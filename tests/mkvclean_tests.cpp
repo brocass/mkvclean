@@ -1,0 +1,493 @@
+#include <QDir>
+#include <QFile>
+#include <QJsonDocument>
+#include <QProcess>
+#include <QStandardPaths>
+#include <QTemporaryDir>
+#include <QtTest>
+
+#include "backend.h"
+#include "mkv.h"
+#include "theme.h"
+#include "translator.h"
+
+class MkvCleanTests : public QObject {
+    Q_OBJECT
+
+private slots:
+    void parsesTracks()
+    {
+        const auto tracks = Mkv::parseTracks(QJsonDocument::fromJson(R"({
+            "tracks": [
+                {"id": 0, "type": "video", "codec": "AVC/H.264", "properties": {"codec_id": "V_MPEG4/ISO/AVC"}},
+                {"id": 1, "type": "audio", "codec": "AAC", "properties": {"codec_id": "A_AAC", "language": "eng", "default_track": true, "track_name": "Stereo"}},
+                {"id": 2, "type": "subtitles", "codec": "SubRip/SRT", "properties": {"codec_id": "S_TEXT/UTF8", "language": "eng", "forced_track": true, "hearing_impaired": true}}
+            ]
+        })"));
+        QCOMPARE(tracks.size(), 3);
+        QCOMPARE(tracks.at(0).language, QString("und"));
+        QCOMPARE(tracks.at(1).name, QString("Stereo"));
+        QVERIFY(tracks.at(1).isDefault);
+        QVERIFY(tracks.at(2).isForced);
+        QVERIFY(tracks.at(2).isHearingImpaired);
+        QCOMPARE(tracks.at(2).codecId, QString("S_TEXT/UTF8"));
+    }
+
+    void planKeepsDefaultEnglishAudio()
+    {
+        const auto plan = Mkv::makePlan({
+            audio(1, "eng", false), audio(2, "eng", true), audio(3, "dan", true),
+        });
+        QVERIFY(plan.error.isEmpty());
+        QCOMPARE(plan.keepAudioId, 2);
+        QCOMPARE(plan.removedCount(), 2);
+    }
+
+    void planFallsBackToFirstEnglishAudio()
+    {
+        const auto plan = Mkv::makePlan({audio(1, "dan", true), audio(2, "eng", false)});
+        QVERIFY(plan.error.isEmpty());
+        QCOMPARE(plan.keepAudioId, 2);
+    }
+
+    void planRequiresEnglishAudio()
+    {
+        const auto plan = Mkv::makePlan({audio(1, "dan", true), audio(2, "jpn", false)});
+        QCOMPARE(plan.error, QString("no-english-audio"));
+        QCOMPARE(plan.keepAudioId, -1);
+    }
+
+    void planCollectsOnlyEnglishSubtitles()
+    {
+        MkvTrack forcedSub = subtitles(4, "eng");
+        forcedSub.isForced = true;
+        const auto plan = Mkv::makePlan({
+            audio(1, "eng", true),
+            subtitles(3, "eng"), forcedSub, subtitles(5, "dan"),
+        });
+        QCOMPARE(plan.extractSubtitleIds, QList<int>({3, 4}));
+        // Only the Danish subtitle vanishes without being extracted first.
+        QCOMPARE(plan.removedCount(), 1);
+    }
+
+    void subtitleExtensions()
+    {
+        QCOMPARE(Mkv::subtitleExtension("S_TEXT/UTF8"), QString("srt"));
+        QCOMPARE(Mkv::subtitleExtension("S_TEXT/ASS"), QString("ass"));
+        QCOMPARE(Mkv::subtitleExtension("S_TEXT/WEBVTT"), QString("vtt"));
+        QCOMPARE(Mkv::subtitleExtension("S_HDMV/PGS"), QString("sup"));
+        QCOMPARE(Mkv::subtitleExtension("S_VOBSUB"), QString("sub"));
+        QCOMPARE(Mkv::subtitleExtension("S_HDMV/TEXTST"), QString("textst"));
+    }
+
+    void classifiesSubtitles()
+    {
+        MkvTrack track = subtitles(1, "eng");
+        QCOMPARE(Mkv::subtitleClass(track), MkvSubtitleClass::Plain);
+
+        track.isForced = true;
+        QCOMPARE(Mkv::subtitleClass(track), MkvSubtitleClass::Forced);
+
+        // Forced wins even when the hearing-impaired flag is also set.
+        track.isHearingImpaired = true;
+        QCOMPARE(Mkv::subtitleClass(track), MkvSubtitleClass::Forced);
+
+        track = subtitles(2, "eng");
+        track.isHearingImpaired = true;
+        QCOMPARE(Mkv::subtitleClass(track), MkvSubtitleClass::Sdh);
+
+        // No flag, but the name says it — how releases actually tag SDH.
+        for (const QString &name : {QString("English SDH"), QString("English [CC]"),
+                                    QString("Hearing Impaired"), QString("cc")}) {
+            track = subtitles(3, "eng");
+            track.name = name;
+            QCOMPARE(Mkv::subtitleClass(track), MkvSubtitleClass::Sdh);
+        }
+
+        track = subtitles(4, "eng");
+        track.name = "English";
+        QCOMPARE(Mkv::subtitleClass(track), MkvSubtitleClass::Plain);
+    }
+
+    void subtitleFileNames()
+    {
+        MkvTrack plain = subtitles(3, "eng"), forced = subtitles(4, "eng"),
+                 second = subtitles(5, "eng"), sdh = subtitles(6, "eng"), sdhSecond = subtitles(7, "eng");
+        forced.isForced = true;
+        sdh.isHearingImpaired = true;
+        sdhSecond.isHearingImpaired = true;
+        QCOMPARE(Mkv::subtitleFileName("/movies/My Movie.2020.mkv", plain, 0),
+                 QString("/movies/My Movie.2020.en.srt"));
+        QCOMPARE(Mkv::subtitleFileName("/movies/My Movie.2020.mkv", forced, 0),
+                 QString("/movies/My Movie.2020.forced.en.srt"));
+        QCOMPARE(Mkv::subtitleFileName("/movies/My Movie.2020.mkv", second, 1),
+                 QString("/movies/My Movie.2020.2.en.srt"));
+        QCOMPARE(Mkv::subtitleFileName("/movies/My Movie.2020.mkv", sdh, 0),
+                 QString("/movies/My Movie.2020.sdh.en.srt"));
+        QCOMPARE(Mkv::subtitleFileName("/movies/My Movie.2020.mkv", sdhSecond, 1),
+                 QString("/movies/My Movie.2020.sdh.2.en.srt"));
+    }
+
+    void availableNamesAvoidExistingFiles()
+    {
+        QTemporaryDir dir;
+        QCOMPARE(Mkv::availablePath(dir.filePath("Movie.en.srt")), dir.filePath("Movie.en.srt"));
+        write(dir.filePath("Movie.en.srt"), "taken");
+        QCOMPARE(Mkv::availablePath(dir.filePath("Movie.en.srt")), dir.filePath("Movie.en-2.srt"));
+        write(dir.filePath("Movie.en-2.srt"), "taken");
+        QCOMPARE(Mkv::availablePath(dir.filePath("Movie.en.srt")), dir.filePath("Movie.en-3.srt"));
+    }
+
+    void remuxKeepsOnlyThePlannedAudio()
+    {
+        MkvTrack video;
+        video.id = 0;
+        video.type = "video";
+        const auto plan = Mkv::makePlan({video, audio(7, "eng", true), audio(8, "dan", false)});
+        const auto arguments = Mkv::remuxArguments("/in.mkv", "/out.mkv", plan);
+        QVERIFY(arguments.contains("--no-subtitles"));
+        QVERIFY(arguments.contains("--audio-tracks"));
+        QCOMPARE(arguments.at(arguments.indexOf("--audio-tracks") + 1), QString("7"));
+        // Track names are blanked on the survivors: the video and kept audio.
+        QCOMPARE(arguments.count("--track-name"), 2);
+        QVERIFY(arguments.contains("0:"));
+        QVERIFY(arguments.contains("7:"));
+        QCOMPARE(arguments.last(), QString("/in.mkv"));
+    }
+
+    void themeFallsBack()
+    {
+        QTemporaryDir dir;
+        Theme theme(dir.path());
+        QCOMPARE(theme.accent(), QString("#FFD60A"));
+        QCOMPARE(theme.accentForeground(), QString("black"));
+    }
+
+    void themeReadsAccent()
+    {
+        QTemporaryDir dir;
+        QDir(dir.path()).mkpath("theme");
+        write(dir.path() + "/theme/colors.toml", "accent = \"#112233\"\n");
+
+        Theme theme(dir.path());
+        QCOMPARE(theme.accent(), QString("#112233"));
+        QCOMPARE(theme.accentForeground(), QString("white"));
+    }
+
+    void themeFollowsHyprlandRounding()
+    {
+        QTemporaryDir dir;
+        const QString response = dir.filePath("response.json"), command = dir.filePath("hyprctl");
+        write(command, "#!/bin/sh\ncat '" + response.toUtf8() + "'\n");
+        QVERIFY(QFile::setPermissions(command, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        write(response, "{\"int\":0}");
+
+        Theme theme(dir.path(), nullptr, command);
+        QCOMPARE(theme.radius(), 0);
+        write(response, "{\"int\":6}");
+        QTRY_COMPARE(theme.radius(), 6);
+    }
+
+    void translatorFallsBackToEnglish()
+    {
+        QTemporaryDir dir;
+        Translator translator(dir.path() + "/language", dir.path());
+        QCOMPARE(translator.language(), QString("en"));
+        QVERIFY(translator.translate("Main", "Save").isNull());
+    }
+
+    void translatorFollowsTheLanguageFile()
+    {
+        QTemporaryDir dir;
+        write(dir.path() + "/language", "pt-BR\n");
+        write(dir.path() + "/pt.json", R"({"Save": "Guardar", "Open": "Abrir"})");
+        write(dir.path() + "/pt-BR.json", R"({"Save": "Salvar"})");
+
+        Translator translator(dir.path() + "/language", dir.path());
+        QCOMPARE(translator.language(), QString("pt-BR"));
+        QCOMPARE(translator.translate("Main", "Save"), QString("Salvar"));
+        QCOMPARE(translator.translate("Main", "Open"), QString("Abrir"));
+        QVERIFY(translator.translate("Main", "Quit").isNull());
+    }
+
+    void translatorPicksPluralForms()
+    {
+        QTemporaryDir dir;
+        write(dir.path() + "/language", "ru\n");
+        write(dir.path() + "/en.json", R"({"%n clips": {"one": "%n clip", "other": "%n clips"}})");
+        write(dir.path() + "/ru.json", R"({"%n clips": {"one": "%n клип", "few": "%n клипа", "many": "%n клипов", "other": "%n клипа"}})");
+
+        Translator translator(dir.path() + "/language", dir.path());
+        QCOMPARE(translator.translate("Main", "%n clips", nullptr, 21), QString("%n клип"));
+        QCOMPARE(translator.translate("Main", "%n clips", nullptr, 22), QString("%n клипа"));
+        QCOMPARE(translator.translate("Main", "%n clips", nullptr, 25), QString("%n клипов"));
+        QCOMPARE(Translator::pluralCategory("ar", 11), QString("many"));
+        QCOMPARE(Translator::pluralCategory("ja", 1), QString("other"));
+    }
+
+    void backendRejectsNonMkvFiles()
+    {
+        // Dummy tool paths: the suffix check must fail before either runs.
+        Backend backend(nullptr, nullptr, "/bin/true", "/bin/true");
+        QTemporaryDir dir;
+        write(dir.filePath("notes.txt"), "hello");
+        backend.openPath(dir.filePath("notes.txt"));
+        QCOMPARE(backend.state(), QString("error"));
+        QCOMPARE(backend.errorText(), QString("This is not an MKV file."));
+    }
+
+    void backendReportsMissingTools()
+    {
+        Backend backend(nullptr, nullptr, "/nonexistent/mkvmerge", "/nonexistent/mkvextract");
+        QCOMPARE(backend.state(), QString("error"));
+        QVERIFY(backend.errorText().contains("MKVToolNix"));
+    }
+
+    void collectsMkvFilesFromFolders()
+    {
+        QTemporaryDir dir;
+        QDir(dir.path()).mkpath("Season 1");
+        QDir(dir.path()).mkpath("Season 2/extra");
+        write(dir.filePath("Season 1/e10.mkv"), "x");
+        write(dir.filePath("Season 1/e02.mkv"), "x");
+        write(dir.filePath("Season 2/extra/e01.MKV"), "x");
+        write(dir.filePath("notes.txt"), "x");
+
+        const auto files = Mkv::collectMkvFiles({dir.path(), dir.filePath("notes.txt")});
+        QCOMPARE(files.size(), 3);
+        // Full-path natural sort: Season 1 before Season 2, e02 before e10.
+        QVERIFY(files.at(0).endsWith("Season 1/e02.mkv"));
+        QVERIFY(files.at(1).endsWith("Season 1/e10.mkv"));
+        QVERIFY(files.at(2).endsWith("Season 2/extra/e01.MKV"));
+
+        // A file passed both directly and via its folder is collected once;
+        // a non-MKV on its own collects nothing.
+        QCOMPARE(Mkv::collectMkvFiles({dir.path(), dir.filePath("Season 1/e02.mkv")}).size(), 3);
+        QCOMPARE(Mkv::collectMkvFiles({dir.filePath("notes.txt")}).size(), 0);
+    }
+
+    void backendExtractsAndCleansARealFile()
+    {
+        const QString mkvmerge = QStandardPaths::findExecutable("mkvmerge");
+        const QString mkvextract = QStandardPaths::findExecutable("mkvextract");
+        const QString ffmpeg = QStandardPaths::findExecutable("ffmpeg");
+        if (mkvmerge.isEmpty() || mkvextract.isEmpty() || ffmpeg.isEmpty())
+            QSKIP("needs ffmpeg and MKVToolNix");
+
+        QTemporaryDir dir;
+        const QString sample = makeSampleMkv(dir.path(), ffmpeg, mkvmerge);
+        QVERIFY2(!sample.isEmpty(), "could not build the sample MKV");
+
+        Backend backend(nullptr, nullptr, mkvmerge, mkvextract);
+        backend.openPath(sample);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("ready"), 15000);
+        QCOMPARE(backend.extractCount(), 1);
+        // The Danish audio is the only track that vanishes without extraction.
+        QCOMPARE(backend.removedCount(), 1);
+
+        backend.clean();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("done"), 30000);
+
+        // English subtitles landed next to the original with the content intact.
+        QCOMPARE(backend.extractedFiles().size(), 1);
+        const QString srt = backend.extractedFiles().first();
+        QVERIFY(srt.endsWith(".en.srt"));
+        QFile srtFile(srt);
+        QVERIFY(srtFile.open(QIODevice::ReadOnly));
+        QVERIFY(QString::fromUtf8(srtFile.readAll()).contains("Hello from the English track"));
+
+        // The cleaned file replaced the original in place, keeping the video
+        // and the English audio, nothing else; no temp or ".english" strays.
+        QCOMPARE(backend.outputPath(), sample);
+        QVERIFY(!QFile::exists(sample + ".part"));
+        QVERIFY(!QFile::exists(dir.filePath("sample.english.mkv")));
+        const auto kept = Mkv::parseTracks(inspect(mkvmerge, sample));
+        QCOMPARE(kept.size(), 2);
+        QCOMPARE(kept.at(0).type, QString("video"));
+        QCOMPARE(kept.at(1).type, QString("audio"));
+        QCOMPARE(kept.at(1).language, QString("eng"));
+        // Leftover track names are stripped along the way.
+        QVERIFY(kept.at(0).name.isEmpty());
+        QVERIFY(kept.at(1).name.isEmpty());
+    }
+
+    void backendCleansABatch()
+    {
+        const QString mkvmerge = QStandardPaths::findExecutable("mkvmerge");
+        const QString mkvextract = QStandardPaths::findExecutable("mkvextract");
+        const QString ffmpeg = QStandardPaths::findExecutable("ffmpeg");
+        if (mkvmerge.isEmpty() || mkvextract.isEmpty() || ffmpeg.isEmpty())
+            QSKIP("needs ffmpeg and MKVToolNix");
+
+        QTemporaryDir dir;
+        const QString first = makeSampleMkv(dir.path(), ffmpeg, mkvmerge, "a-first.mkv");
+        const QString second = makeSampleMkv(dir.path(), ffmpeg, mkvmerge, "b-second.mkv");
+        QVERIFY2(!first.isEmpty() && !second.isEmpty(), "could not build the sample MKVs");
+
+        Backend backend(nullptr, nullptr, mkvmerge, mkvextract);
+        backend.openPaths({second, first});  // the sort puts a-first first
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("done"), 60000);
+
+        QVERIFY(backend.batch());
+        QVERIFY(!backend.batchAborted());
+        QCOMPARE(backend.queueCleanedCount(), 2);
+        QCOMPARE(backend.queueFailedCount(), 0);
+        QCOMPARE(Mkv::parseTracks(inspect(mkvmerge, first)).size(), 2);
+        QCOMPARE(Mkv::parseTracks(inspect(mkvmerge, second)).size(), 2);
+        QVERIFY(QFile::exists(dir.filePath("a-first.en.srt")));
+        QVERIFY(QFile::exists(dir.filePath("b-second.en.srt")));
+    }
+
+    void backendBatchContinuesPastFailures()
+    {
+        const QString mkvmerge = QStandardPaths::findExecutable("mkvmerge");
+        const QString mkvextract = QStandardPaths::findExecutable("mkvextract");
+        const QString ffmpeg = QStandardPaths::findExecutable("ffmpeg");
+        if (mkvmerge.isEmpty() || mkvextract.isEmpty() || ffmpeg.isEmpty())
+            QSKIP("needs ffmpeg and MKVToolNix");
+
+        QTemporaryDir dir;
+        const QString bad = makeSampleMkv(dir.path(), ffmpeg, mkvmerge, "a-bad.mkv", false);
+        const QString good = makeSampleMkv(dir.path(), ffmpeg, mkvmerge, "b-good.mkv");
+        QVERIFY2(!bad.isEmpty() && !good.isEmpty(), "could not build the sample MKVs");
+
+        Backend backend(nullptr, nullptr, mkvmerge, mkvextract);
+        backend.openPaths({good, bad});
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("done"), 60000);
+
+        QCOMPARE(backend.queueCleanedCount(), 1);
+        QCOMPARE(backend.queueFailedCount(), 1);
+        QCOMPARE(backend.queue().at(0).toMap().value("error").toString(),
+                 QString("No English audio track in this file."));
+        // The failed file kept all of its tracks; the good one was cleaned.
+        QCOMPARE(Mkv::parseTracks(inspect(mkvmerge, bad)).size(), 3);
+        QCOMPARE(Mkv::parseTracks(inspect(mkvmerge, good)).size(), 2);
+    }
+
+    void backendExtractsPlainSdhAndForcedNames()
+    {
+        const QString mkvmerge = QStandardPaths::findExecutable("mkvmerge");
+        const QString mkvextract = QStandardPaths::findExecutable("mkvextract");
+        const QString ffmpeg = QStandardPaths::findExecutable("ffmpeg");
+        if (mkvmerge.isEmpty() || mkvextract.isEmpty() || ffmpeg.isEmpty())
+            QSKIP("needs ffmpeg and MKVToolNix");
+
+        QTemporaryDir dir;
+        // Video + default English audio + three English subtitles: plain, SDH
+        // (flagged), and forced — each with its own content to tell them apart.
+        const QString sample = makeSampleMkv(dir.path(), ffmpeg, mkvmerge, "rich.mkv");
+        QVERIFY2(!sample.isEmpty(), "could not build the sample MKV");
+        const QString plainSrt = dir.filePath("plain.srt"), sdhSrt = dir.filePath("sdh.srt"),
+                      forcedSrt = dir.filePath("forced.srt"), rich = dir.filePath("rich-subs.mkv");
+        write(plainSrt, "1\n00:00:00,000 --> 00:00:01,500\nPlain line\n");
+        write(sdhSrt, "1\n00:00:00,000 --> 00:00:01,500\n[sdh line]\n");
+        write(forcedSrt, "1\n00:00:00,000 --> 00:00:01,500\nForced line\n");
+        QVERIFY(QProcess::execute(mkvmerge, {"-q", "-o", rich, sample,
+                                             "--language", "0:eng", "--track-name", "0:English", plainSrt,
+                                             "--language", "0:eng", "--hearing-impaired-flag", "0:yes",
+                                             "--track-name", "0:English SDH", sdhSrt,
+                                             "--language", "0:eng", "--forced-display-flag", "0:yes",
+                                             "--track-name", "0:English forced", forcedSrt}) == 0);
+
+        Backend backend(nullptr, nullptr, mkvmerge, mkvextract);
+        backend.openPath(rich);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("ready"), 15000);
+        // The base sample's own English subtitle rides along as plain #1.
+        QCOMPARE(backend.extractCount(), 4);
+
+        backend.clean();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("done"), 30000);
+
+        QCOMPARE(backend.extractedFiles().size(), 4);
+        const auto read = [](const QString &path) {
+            QFile file(path);
+            return file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()) : QString();
+        };
+        const QString base = dir.filePath("rich-subs");
+        QVERIFY(backend.extractedFiles().contains(base + ".en.srt"));
+        QVERIFY(backend.extractedFiles().contains(base + ".2.en.srt"));
+        QVERIFY(backend.extractedFiles().contains(base + ".sdh.en.srt"));
+        QVERIFY(backend.extractedFiles().contains(base + ".forced.en.srt"));
+        QVERIFY(read(base + ".en.srt").contains("Hello from the English track"));
+        QVERIFY(read(base + ".2.en.srt").contains("Plain line"));
+        QVERIFY(read(base + ".sdh.en.srt").contains("[sdh line]"));
+        QVERIFY(read(base + ".forced.en.srt").contains("Forced line"));
+    }
+
+private:
+    static MkvTrack audio(int id, const QString &language, bool isDefault)
+    {
+        MkvTrack track;
+        track.id = id;
+        track.type = "audio";
+        track.codec = "AAC";
+        track.codecId = "A_AAC";
+        track.language = language;
+        track.isDefault = isDefault;
+        return track;
+    }
+
+    static MkvTrack subtitles(int id, const QString &language)
+    {
+        MkvTrack track;
+        track.id = id;
+        track.type = "subtitles";
+        track.codec = "SubRip/SRT";
+        track.codecId = "S_TEXT/UTF8";
+        track.language = language;
+        return track;
+    }
+
+    static void write(const QString &path, const QByteArray &contents)
+    {
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(contents);
+    }
+
+    static QJsonDocument inspect(const QString &mkvmerge, const QString &path)
+    {
+        QProcess process;
+        process.start(mkvmerge, {"-J", path});
+        process.waitForFinished(15000);
+        return QJsonDocument::fromJson(process.readAllStandardOutput());
+    }
+
+    // A tiny MKV with video, English (default) and Danish audio, and English
+    // subtitles — the shape mkvclean exists for. Without English audio it
+    // becomes the batch's failure case.
+    static QString makeSampleMkv(const QString &directory, const QString &ffmpeg, const QString &mkvmerge,
+                                 const QString &name = "sample.mkv", bool withEnglishAudio = true)
+    {
+        QDir dir(directory);
+        const QString video = dir.filePath("video.mkv"), engWav = dir.filePath("eng.wav"),
+                      danWav = dir.filePath("dan.wav"), engSrt = dir.filePath("eng.srt"),
+                      sample = dir.filePath(name);
+        if (QProcess::execute(ffmpeg, {"-hide_banner", "-loglevel", "error", "-y",
+                                       "-f", "lavfi", "-i", "testsrc=duration=2:size=160x120:rate=10",
+                                       "-c:v", "libx264", "-pix_fmt", "yuv420p", video}) != 0)
+            return {};
+        QStringList tones{QString("550")};
+        if (withEnglishAudio)
+            tones.prepend(QString("440"));
+        for (const auto &tone : tones) {
+            const QString path = tone == "440" ? engWav : danWav;
+            if (QProcess::execute(ffmpeg, {"-hide_banner", "-loglevel", "error", "-y",
+                                           "-f", "lavfi", "-i", "sine=frequency=" + tone + ":duration=2",
+                                           "-c:a", "pcm_s16le", path}) != 0)
+                return {};
+        }
+        write(engSrt, "1\n00:00:00,000 --> 00:00:01,500\nHello from the English track\n");
+        QStringList arguments{"-q", "-o", sample, video};
+        if (withEnglishAudio)
+            arguments << "--language" << "0:eng" << "--default-track-flag" << "0:yes"
+                      << "--track-name" << "0:English stereo" << engWav;
+        arguments << "--language" << "0:dan" << danWav << "--language" << "0:eng" << engSrt;
+        if (QProcess::execute(mkvmerge, arguments) != 0)
+            return {};
+        return sample;
+    }
+};
+
+QTEST_MAIN(MkvCleanTests)
+#include "mkvclean_tests.moc"

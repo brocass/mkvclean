@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=MKV Clean
+Comment=Extract English subtitles and keep only the default English audio in MKV files
+Comment[da]=Udpak engelske undertekster og behold kun det engelske standardlydspor i MKV-filer
+Comment[de]=Englische Untertitel extrahieren und nur die englische Standard-Tonspur in MKV-Dateien behalten
+Comment[fr]=Extraire les sous-titres anglais et ne garder que la piste audio anglaise par défaut des fichiers MKV
+Comment[pt_BR]=Extraia legendas em inglês e mantenha apenas a faixa de áudio padrão em inglês em arquivos MKV
+Exec=mkvclean %f
+Icon=mkvclean
+Terminal=false
+Categories=AudioVideo;
+MimeType=video/x-matroska;
+StartupWMClass=mkvclean
