@@ -20,11 +20,26 @@
   "Queued": "Wartend",
   "Cleaning…": "Bereinige…",
   "Failed": "Fehlgeschlagen",
-  "%n subtitle track will be extracted first.": { "one": "%n Untertitelspur wird zuerst extrahiert.", "other": "%n Untertitelspuren werden zuerst extrahiert." },
-  "%n other track will be removed.": { "one": "%n weitere Spur wird entfernt.", "other": "%n weitere Spuren werden entfernt." },
-  "%n subtitle file extracted": { "one": "%n Untertiteldatei extrahiert", "other": "%n Untertiteldateien extrahiert" },
-  "%n file cleaned": { "one": "%n Datei bereinigt", "other": "%n Dateien bereinigt" },
-  "%n file failed": { "one": "%n Datei fehlgeschlagen", "other": "%n Dateien fehlgeschlagen" },
+  "%n subtitle track will be extracted first.": {
+    "one": "%n Untertitelspur wird zuerst extrahiert.",
+    "other": "%n Untertitelspuren werden zuerst extrahiert."
+  },
+  "%n other track will be removed.": {
+    "one": "%n weitere Spur wird entfernt.",
+    "other": "%n weitere Spuren werden entfernt."
+  },
+  "%n subtitle file extracted": {
+    "one": "%n Untertiteldatei extrahiert",
+    "other": "%n Untertiteldateien extrahiert"
+  },
+  "%n file cleaned": {
+    "one": "%n Datei bereinigt",
+    "other": "%n Dateien bereinigt"
+  },
+  "%n file failed": {
+    "one": "%n Datei fehlgeschlagen",
+    "other": "%n Dateien fehlgeschlagen"
+  },
   "Stopped early.": "Frühzeitig gestoppt.",
   "File %1 of %2": "Datei %1 von %2",
   "The original file will be replaced — it's moved to the trash if possible.": "Die Originaldatei wird ersetzt — sie wird nach Möglichkeit in den Papierkorb verschoben.",
@@ -40,14 +55,29 @@
   "Extracting subtitles…": "Untertitel werden extrahiert…",
   "Writing cleaned file…": "Bereinigte Datei wird geschrieben…",
   "This file could not be read.": "Diese Datei konnte nicht gelesen werden.",
-  "No English audio track in this file.": "Diese Datei enthält keine englische Tonspur.",
   "This is not an MKV file.": "Dies ist keine MKV-Datei.",
   "Extracting the subtitles failed.": "Das Extrahieren der Untertitel ist fehlgeschlagen.",
   "Remuxing failed.": "Remuxing fehlgeschlagen.",
-  "Could not move the finished file into place.": "Die fertige Datei konnte nicht an ihren Platz verschoben werden.",
-  "Could not replace the original file.": "Die Originaldatei konnte nicht ersetzt werden.",
   "MKVToolNix (mkvmerge, mkvextract) is not installed.": "MKVToolNix (mkvmerge, mkvextract) ist nicht installiert.",
   "Choose MKV files": "MKV-Dateien auswählen",
   "Choose a folder": "Ordner auswählen",
-  "Open": "Öffnen"
+  "Open": "Öffnen",
+  "The original file is in use; the cleaned file was left as %1.": "Die Originaldatei ist in Verwendung; die bereinigte Datei wurde als %1 belassen.",
+  "Settings": "Einstellungen",
+  "Watched folders": "Überwachte Ordner",
+  "The watch service cleans new files that appear in these folders.": "Der Überwachungsdienst bereinigt neue Dateien, die in diesen Ordnern erscheinen.",
+  "Add folder": "Ordner hinzufügen",
+  "Scan now": "Jetzt scannen",
+  "Scanning the library…": "Bibliothek wird gescannt…",
+  "Everything is already clean.": "Alles ist bereits sauber.",
+  "Audio language": "Audiosprache",
+  "Subtitle language": "Untertitelsprache",
+  "Watch service": "Überwachungsdienst",
+  "running": "läuft",
+  "stopped": "gestoppt",
+  "Enable": "Aktivieren",
+  "Disable": "Deaktivieren",
+  "Excluded folders": "Ausgeschlossene Ordner",
+  "Folders inside these are never watched or scanned.": "Ordner darin werden nie überwacht oder gescannt.",
+  "Exclude folder": "Ordner ausschließen"
 }

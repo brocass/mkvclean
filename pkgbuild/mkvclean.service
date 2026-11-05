@@ -1,0 +1,11 @@
+[Unit]
+Description=MKV Clean folder watcher
+Documentation=https://github.com/brocass/mkvclean
+
+[Service]
+ExecStart=/usr/bin/mkvclean watch
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

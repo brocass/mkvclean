@@ -20,11 +20,26 @@
   "Queued": "I kø",
   "Cleaning…": "Renser…",
   "Failed": "Mislykket",
-  "%n subtitle track will be extracted first.": { "one": "%n undertekstspor udpakkes først.", "other": "%n undertekstspor udpakkes først." },
-  "%n other track will be removed.": { "one": "%n andet spor fjernes.", "other": "%n andre spor fjernes." },
-  "%n subtitle file extracted": { "one": "%n undertekstfil udpakket", "other": "%n undertekstfiler udpakket" },
-  "%n file cleaned": { "one": "%n fil renset", "other": "%n filer renset" },
-  "%n file failed": { "one": "%n fil mislykket", "other": "%n filer mislykket" },
+  "%n subtitle track will be extracted first.": {
+    "one": "%n undertekstspor udpakkes først.",
+    "other": "%n undertekstspor udpakkes først."
+  },
+  "%n other track will be removed.": {
+    "one": "%n andet spor fjernes.",
+    "other": "%n andre spor fjernes."
+  },
+  "%n subtitle file extracted": {
+    "one": "%n undertekstfil udpakket",
+    "other": "%n undertekstfiler udpakket"
+  },
+  "%n file cleaned": {
+    "one": "%n fil renset",
+    "other": "%n filer renset"
+  },
+  "%n file failed": {
+    "one": "%n fil mislykket",
+    "other": "%n filer mislykket"
+  },
   "Stopped early.": "Stoppet tidligt.",
   "File %1 of %2": "Fil %1 af %2",
   "The original file will be replaced — it's moved to the trash if possible.": "Originalfilen erstattes — den flyttes til papirkurven hvis muligt.",
@@ -40,14 +55,29 @@
   "Extracting subtitles…": "Udpakker undertekster…",
   "Writing cleaned file…": "Skriver renset fil…",
   "This file could not be read.": "Filen kunne ikke læses.",
-  "No English audio track in this file.": "Filen har ingen engelsk lydspor.",
   "This is not an MKV file.": "Dette er ikke en MKV-fil.",
   "Extracting the subtitles failed.": "Udpakning af underteksterne mislykkedes.",
   "Remuxing failed.": "Ompakning mislykkedes.",
-  "Could not move the finished file into place.": "Kunne ikke flytte den færdige fil på plads.",
-  "Could not replace the original file.": "Kunne ikke erstatte originalfilen.",
   "MKVToolNix (mkvmerge, mkvextract) is not installed.": "MKVToolNix (mkvmerge, mkvextract) er ikke installeret.",
   "Choose MKV files": "Vælg MKV-filer",
   "Choose a folder": "Vælg en mappe",
-  "Open": "Åbn"
+  "Open": "Åbn",
+  "The original file is in use; the cleaned file was left as %1.": "Originalfilen er i brug; den rensede fil blev efterladt som %1.",
+  "Settings": "Indstillinger",
+  "Watched folders": "Overvågede mapper",
+  "The watch service cleans new files that appear in these folders.": "Overvågningstjenesten renser nye filer, der dukker op i disse mapper.",
+  "Add folder": "Tilføj mappe",
+  "Scan now": "Scan nu",
+  "Scanning the library…": "Scanner biblioteket…",
+  "Everything is already clean.": "Alt er allerede rent.",
+  "Audio language": "Lydsprog",
+  "Subtitle language": "Undertekstsprog",
+  "Watch service": "Overvågningstjeneste",
+  "running": "kører",
+  "stopped": "stoppet",
+  "Enable": "Aktivér",
+  "Disable": "Deaktivér",
+  "Excluded folders": "Ekskluderede mapper",
+  "Folders inside these are never watched or scanned.": "Mapper i disse overvåges eller scannes aldrig.",
+  "Exclude folder": "Ekskludér mappe"
 }

@@ -8,8 +8,10 @@
 
 #include "backend.h"
 #include "mkv.h"
+#include "settings.h"
 #include "theme.h"
 #include "translator.h"
+#include "watcher.h"
 
 class MkvCleanTests : public QObject {
     Q_OBJECT
@@ -38,7 +40,6 @@ private slots:
         const auto plan = Mkv::makePlan({
             audio(1, "eng", false), audio(2, "eng", true), audio(3, "dan", true),
         });
-        QVERIFY(plan.error.isEmpty());
         QCOMPARE(plan.keepAudioId, 2);
         QCOMPARE(plan.removedCount(), 2);
     }
@@ -46,15 +47,27 @@ private slots:
     void planFallsBackToFirstEnglishAudio()
     {
         const auto plan = Mkv::makePlan({audio(1, "dan", true), audio(2, "eng", false)});
-        QVERIFY(plan.error.isEmpty());
         QCOMPARE(plan.keepAudioId, 2);
     }
 
-    void planRequiresEnglishAudio()
+    void planKeepsTheForeignDefaultAudio()
     {
-        const auto plan = Mkv::makePlan({audio(1, "dan", true), audio(2, "jpn", false)});
-        QCOMPARE(plan.error, QString("no-english-audio"));
+        // A genuinely foreign film keeps whatever would play by default.
+        QCOMPARE(Mkv::makePlan({audio(1, "dan", true), audio(2, "jpn", false)}).keepAudioId, 1);
+        QCOMPARE(Mkv::makePlan({audio(1, "dan", false), audio(2, "jpn", true)}).keepAudioId, 2);
+        // Nothing marked default: the first audio track stays.
+        QCOMPARE(Mkv::makePlan({audio(1, "dan", false), audio(2, "jpn", false)}).keepAudioId, 1);
+    }
+
+    void planWithoutAudioKeepsVideoOnly()
+    {
+        MkvTrack video;
+        video.id = 0;
+        video.type = "video";
+        const auto plan = Mkv::makePlan({video, subtitles(3, "eng")});
         QCOMPARE(plan.keepAudioId, -1);
+        QCOMPARE(plan.extractSubtitleIds, QList<int>({3}));
+        QCOMPARE(plan.removedCount(), 0);
     }
 
     void planCollectsOnlyEnglishSubtitles()
@@ -181,6 +194,11 @@ private slots:
         QVERIFY(arguments.contains("0:"));
         QVERIFY(arguments.contains("7:"));
         QCOMPARE(arguments.last(), QString("/in.mkv"));
+
+        // A file with no audio at all remuxes video-only.
+        const auto silent = Mkv::remuxArguments("/in.mkv", "/out.mkv", Mkv::makePlan({video}));
+        QVERIFY(silent.contains("--no-audio"));
+        QVERIFY(!silent.contains("--audio-tracks"));
     }
 
     void themeFallsBack()
@@ -327,7 +345,7 @@ private slots:
         // The cleaned file replaced the original in place, keeping the video
         // and the English audio, nothing else; no temp or ".english" strays.
         QCOMPARE(backend.outputPath(), sample);
-        QVERIFY(!QFile::exists(sample + ".part"));
+        QVERIFY(!QFile::exists(sample + ".remux"));
         QVERIFY(!QFile::exists(dir.filePath("sample.english.mkv")));
         const auto kept = Mkv::parseTracks(inspect(mkvmerge, sample));
         QCOMPARE(kept.size(), 2);
@@ -375,9 +393,11 @@ private slots:
             QSKIP("needs ffmpeg and MKVToolNix");
 
         QTemporaryDir dir;
-        const QString bad = makeSampleMkv(dir.path(), ffmpeg, mkvmerge, "a-bad.mkv", false);
+        // The failure is a corrupt file; it must not stop the batch.
+        const QString bad = dir.filePath("a-bad.mkv");
+        write(bad, "this is not really a matroska file");
         const QString good = makeSampleMkv(dir.path(), ffmpeg, mkvmerge, "b-good.mkv");
-        QVERIFY2(!bad.isEmpty() && !good.isEmpty(), "could not build the sample MKVs");
+        QVERIFY2(!good.isEmpty(), "could not build the sample MKV");
 
         Backend backend(nullptr, nullptr, mkvmerge, mkvextract);
         backend.openPaths({good, bad});
@@ -386,10 +406,42 @@ private slots:
         QCOMPARE(backend.queueCleanedCount(), 1);
         QCOMPARE(backend.queueFailedCount(), 1);
         QCOMPARE(backend.queue().at(0).toMap().value("error").toString(),
-                 QString("No English audio track in this file."));
-        // The failed file kept all of its tracks; the good one was cleaned.
-        QCOMPARE(Mkv::parseTracks(inspect(mkvmerge, bad)).size(), 3);
+                 QString("This file could not be read."));
+        // The failed file was not modified; the good one was cleaned.
+        QFile badFile(bad);
+        QVERIFY(badFile.open(QIODevice::ReadOnly));
+        QCOMPARE(QString::fromUtf8(badFile.readAll()), QString("this is not really a matroska file"));
         QCOMPARE(Mkv::parseTracks(inspect(mkvmerge, good)).size(), 2);
+    }
+
+    void backendKeepsForeignAudioWhenNoEnglishExists()
+    {
+        const QString mkvmerge = QStandardPaths::findExecutable("mkvmerge");
+        const QString mkvextract = QStandardPaths::findExecutable("mkvextract");
+        const QString ffmpeg = QStandardPaths::findExecutable("ffmpeg");
+        if (mkvmerge.isEmpty() || mkvextract.isEmpty() || ffmpeg.isEmpty())
+            QSKIP("needs ffmpeg and MKVToolNix");
+
+        QTemporaryDir dir;
+        // Video + Danish audio only + English subtitles: a foreign film.
+        const QString sample = makeSampleMkv(dir.path(), ffmpeg, mkvmerge, "foreign.mkv", false);
+        QVERIFY2(!sample.isEmpty(), "could not build the sample MKV");
+
+        Backend backend(nullptr, nullptr, mkvmerge, mkvextract);
+        backend.openPath(sample);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("ready"), 15000);
+        QCOMPARE(backend.extractCount(), 1);
+
+        backend.clean();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("done"), 30000);
+
+        // The foreign audio survived, the subtitles came out, nothing else.
+        const auto kept = Mkv::parseTracks(inspect(mkvmerge, sample));
+        QCOMPARE(kept.size(), 2);
+        QCOMPARE(kept.at(0).type, QString("video"));
+        QCOMPARE(kept.at(1).type, QString("audio"));
+        QCOMPARE(kept.at(1).language, QString("dan"));
+        QVERIFY(QFile::exists(dir.filePath("foreign.en.srt")));
     }
 
     void backendSkipsSdhWhenPlainExists()
@@ -476,6 +528,231 @@ private slots:
         QFile extracted(dir.filePath("sdh-only.sdh.en.srt"));
         QVERIFY(extracted.open(QIODevice::ReadOnly));
         QVERIFY(QString::fromUtf8(extracted.readAll()).contains("[sdh line]"));
+    }
+
+    void replaceOriginalSwapsAndKeepsOnFailure()
+    {
+        QTemporaryDir dir;
+        const QString original = dir.filePath("Movie.mkv"), remux = original + ".remux";
+
+        write(original, "old");
+        write(remux, "new");
+        QVERIFY(Mkv::replaceOriginal(original, remux));
+        QFile swapped(original);
+        QVERIFY(swapped.open(QIODevice::ReadOnly));
+        QCOMPARE(QString::fromUtf8(swapped.readAll()), QString("new"));
+        QVERIFY(!QFile::exists(remux));
+
+        // A read-only directory blocks the swap; the verified remux survives
+        // for a later retry, and the original is untouched.
+        write(original, "old2");
+        write(remux, "new2");
+        QVERIFY(QFile::setPermissions(dir.path(), QFile::ReadOwner | QFile::ExeOwner));
+        QVERIFY(!Mkv::replaceOriginal(original, remux));
+        QVERIFY(QFile::exists(remux));
+        QVERIFY(QFile::exists(original));
+        QVERIFY(QFile::setPermissions(dir.path(), QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+    }
+
+    void watcherCompletesPendingSwaps()
+    {
+        QTemporaryDir dir;
+        const QString original = dir.filePath("Movie.mkv");
+        write(original, "old contents");
+        write(original + ".remux", "new contents");
+
+        Watcher watcher({dir.path()}, 500, nullptr, "/bin/true", "/bin/true");
+        QStringList log;
+        connect(&watcher, &Watcher::logLine, this,
+                [&log](const QString &line) { log.append(line); });
+        watcher.start();
+
+        QTRY_VERIFY_WITH_TIMEOUT(!QFile::exists(original + ".remux"), 10000);
+        QFile swapped(original);
+        QVERIFY(swapped.open(QIODevice::ReadOnly));
+        QCOMPARE(QString::fromUtf8(swapped.readAll()), QString("new contents"));
+        QVERIFY(log.contains("mkvclean: completed replacement of " + original));
+    }
+
+    void settingsRoundTrip()
+    {
+        QTemporaryDir dir;
+        QDir(dir.path()).mkpath("watched");
+        const QString config = dir.filePath("nested/config.json");
+
+        AppSettings settings(config, dir.filePath("no-legacy"));
+        QCOMPARE(settings.audioLanguage(), QString("eng"));
+        QCOMPARE(settings.subtitleLanguage(), QString("eng"));
+        QVERIFY(settings.languageModel().size() > 30);
+
+        settings.addWatchFolder(dir.filePath("watched"));
+        settings.addWatchFolder("/nonexistent-folder");
+        settings.addWatchFolder(dir.filePath("watched"));
+        QCOMPARE(settings.watchFolders(), QStringList({dir.filePath("watched")}));
+
+        settings.setAudioLanguage("dan");
+        settings.setSubtitleLanguage("ger");
+        settings.setAudioLanguage("not-a-code");  // rejected, keeps the old value
+
+        AppSettings reloaded(config, dir.filePath("no-legacy"));
+        QCOMPARE(reloaded.watchFolders(), QStringList({dir.filePath("watched")}));
+        QCOMPARE(reloaded.audioLanguage(), QString("dan"));
+        QCOMPARE(reloaded.subtitleLanguage(), QString("ger"));
+
+        reloaded.removeWatchFolder(dir.filePath("watched"));
+        QVERIFY(reloaded.watchFolders().isEmpty());
+
+        // Excluded folders round-trip the same way.
+        reloaded.addExcludedFolder(dir.filePath("watched"));
+        reloaded.addExcludedFolder(dir.filePath("watched"));
+        QCOMPARE(reloaded.excludedFolders(), QStringList({dir.filePath("watched")}));
+        AppSettings reloadedAgain(config, dir.filePath("no-legacy"));
+        QCOMPARE(reloadedAgain.excludedFolders(), QStringList({dir.filePath("watched")}));
+        reloadedAgain.removeExcludedFolder(dir.filePath("watched"));
+        QVERIFY(reloadedAgain.excludedFolders().isEmpty());
+    }
+
+    void withoutExcludedDropsNestedPaths()
+    {
+        const QStringList paths{"/videos/Movies/a.mkv", "/videos/Music Videos/b.mkv",
+                                "/videos/Music/c.mkv", "/videos/Movies/d.mkv"};
+        const auto kept = Mkv::withoutExcluded(paths, {"/videos/Music Videos"});
+        QCOMPARE(kept, QStringList({"/videos/Movies/a.mkv", "/videos/Music/c.mkv",
+                                    "/videos/Movies/d.mkv"}));
+        // A sibling whose name merely starts the same stays.
+        QVERIFY(Mkv::withoutExcluded({"/videos/Music/a.mkv"}, {"/videos/Music Videos"})
+                == QStringList({"/videos/Music/a.mkv"}));
+        QVERIFY(Mkv::withoutExcluded({"/videos/Music Videos"}, {"/videos/Music Videos"}).isEmpty());
+        QCOMPARE(Mkv::withoutExcluded(paths, {}), paths);
+    }
+
+    void settingsImportsLegacyWatchFolders()
+    {
+        QTemporaryDir dir;
+        const QString legacy = dir.filePath("watch-folders");
+        write(legacy, "# my folders\n/videos/tv\n\n/videos/movies\n");
+
+        AppSettings settings(dir.filePath("config.json"), legacy);
+        QCOMPARE(settings.watchFolders(), QStringList({"/videos/tv", "/videos/movies"}));
+        // The import is saved to the new config straight away.
+        QVERIFY(QFile::exists(dir.filePath("config.json")));
+    }
+
+    void languageSuffixes()
+    {
+        QCOMPARE(Mkv::languageSuffix("eng"), QString("en"));
+        QCOMPARE(Mkv::languageSuffix("dan"), QString("da"));
+        QCOMPARE(Mkv::languageSuffix("ger"), QString("de"));
+        QCOMPARE(Mkv::languageSuffix("zho"), QString("zho"));
+    }
+
+    void planHonorsPreferredLanguages()
+    {
+        MkvTrack danishSub = subtitles(4, "dan");
+        const auto plan = Mkv::makePlan({audio(1, "dan", true), audio(2, "eng", false),
+                                         subtitles(3, "eng"), danishSub},
+                                        QStringLiteral("dan"), QStringLiteral("dan"));
+        QCOMPARE(plan.keepAudioId, 1);
+        QCOMPARE(plan.extractSubtitleIds, QList<int>({4}));
+    }
+
+    void subtitleFileNamesFollowTheLanguage()
+    {
+        MkvTrack track = subtitles(3, "dan");
+        QCOMPARE(Mkv::subtitleFileName("/movies/Movie.mkv", track, 0, "dan"),
+                 QString("/movies/Movie.da.srt"));
+        QCOMPARE(Mkv::subtitleFileName("/movies/Movie.mkv", track, 0, "ger"),
+                 QString("/movies/Movie.de.srt"));
+    }
+
+    void watcherProcessesNewFilesOnly()
+    {
+        const QString mkvmerge = QStandardPaths::findExecutable("mkvmerge");
+        const QString mkvextract = QStandardPaths::findExecutable("mkvextract");
+        const QString ffmpeg = QStandardPaths::findExecutable("ffmpeg");
+        if (mkvmerge.isEmpty() || mkvextract.isEmpty() || ffmpeg.isEmpty())
+            QSKIP("needs ffmpeg and MKVToolNix");
+
+        QTemporaryDir dir;
+        // Present before the watcher starts: must be snapshotted, never cleaned.
+        QVERIFY2(!makeSampleMkv(dir.path(), ffmpeg, mkvmerge, "old.mkv").isEmpty(),
+                 "could not build the sample MKV");
+
+        Watcher watcher({dir.path()}, 500, nullptr, mkvmerge, mkvextract);
+        QStringList log;
+        connect(&watcher, &Watcher::logLine, this,
+                [&log](const QString &line) { log.append(line); });
+        watcher.start();
+
+        // Arriving after startup: settled, then cleaned.
+        const QString fresh = makeSampleMkv(dir.path(), ffmpeg, mkvmerge, "new.mkv");
+        QVERIFY2(!fresh.isEmpty(), "could not build the second sample MKV");
+
+        QTRY_VERIFY_WITH_TIMEOUT(Mkv::parseTracks(inspect(mkvmerge, fresh)).size() == 2, 30000);
+        QVERIFY(QFile::exists(dir.filePath("new.en.srt")));
+        QVERIFY(log.contains("mkvclean: cleaned " + fresh));
+
+        // The pre-existing file kept all of its tracks and its subtitles.
+        QCOMPARE(Mkv::parseTracks(inspect(mkvmerge, dir.filePath("old.mkv"))).size(), 4);
+        QVERIFY(!QFile::exists(dir.filePath("old.en.srt")));
+    }
+
+    void backendScanCleansOnlyDirtyFiles()
+    {
+        const QString mkvmerge = QStandardPaths::findExecutable("mkvmerge");
+        const QString mkvextract = QStandardPaths::findExecutable("mkvextract");
+        const QString ffmpeg = QStandardPaths::findExecutable("ffmpeg");
+        if (mkvmerge.isEmpty() || mkvextract.isEmpty() || ffmpeg.isEmpty())
+            QSKIP("needs ffmpeg and MKVToolNix");
+
+        QTemporaryDir dir;
+        const QString dirty = makeSampleMkv(dir.path(), ffmpeg, mkvmerge, "dirty.mkv");
+        QVERIFY2(!dirty.isEmpty(), "could not build the sample MKV");
+        // A file that is already clean: video plus one audio, nothing else.
+        const QString clean = dir.filePath("clean.mkv");
+        QVERIFY(QProcess::execute(mkvmerge, {"-q", "-o", clean, dir.filePath("video.mkv"),
+                                             "--language", "0:eng", "--default-track-flag", "0:yes",
+                                             dir.filePath("eng.wav")}) == 0);
+
+        Backend backend(nullptr, nullptr, mkvmerge, mkvextract);
+        backend.scanFolders({dir.path()});
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("done"), 60000);
+
+        QVERIFY(!backend.scanFoundNothing());
+        QCOMPARE(backend.queueCleanedCount(), 1);
+        QCOMPARE(Mkv::parseTracks(inspect(mkvmerge, dirty)).size(), 2);
+        // The already-clean file was not probed a second time.
+        QCOMPARE(Mkv::parseTracks(inspect(mkvmerge, clean)).size(), 2);
+        QVERIFY(!QFile::exists(dir.filePath("clean.en.srt")));
+    }
+
+    void watcherSkipsExcludedFolders()
+    {
+        const QString mkvmerge = QStandardPaths::findExecutable("mkvmerge");
+        const QString mkvextract = QStandardPaths::findExecutable("mkvextract");
+        const QString ffmpeg = QStandardPaths::findExecutable("ffmpeg");
+        if (mkvmerge.isEmpty() || mkvextract.isEmpty() || ffmpeg.isEmpty())
+            QSKIP("needs ffmpeg and MKVToolNix");
+
+        QTemporaryDir dir;
+        QDir(dir.path()).mkpath("Music Videos");
+        AppSettings settings(dir.filePath("config.json"), dir.filePath("no-legacy"));
+        settings.addExcludedFolder(dir.filePath("Music Videos"));
+
+        Watcher watcher({dir.path()}, 500, nullptr, mkvmerge, mkvextract, &settings);
+        watcher.start();
+
+        // One file in the excluded folder, one next to it: only the latter
+        // may be processed, and the excluded one must not even be settled.
+        QVERIFY2(!makeSampleMkv(dir.filePath("Music Videos"), ffmpeg, mkvmerge, "mv.mkv").isEmpty(),
+                 "could not build the sample MKV");
+        const QString kept = makeSampleMkv(dir.path(), ffmpeg, mkvmerge, "movie.mkv");
+        QVERIFY2(!kept.isEmpty(), "could not build the second sample MKV");
+
+        QTRY_VERIFY_WITH_TIMEOUT(Mkv::parseTracks(inspect(mkvmerge, kept)).size() == 2, 30000);
+        QTest::qWait(1500);  // long enough for the excluded file's settle, had it armed
+        QCOMPARE(Mkv::parseTracks(inspect(mkvmerge, dir.filePath("Music Videos/mv.mkv"))).size(), 4);
+        QVERIFY(!QFile::exists(dir.filePath("Music Videos/mv.en.srt")));
     }
 
 private:

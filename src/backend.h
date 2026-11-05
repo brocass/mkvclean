@@ -7,6 +7,7 @@
 
 #include "mkv.h"
 
+class AppSettings;
 class FilePicker;
 
 // Drives the app's one job: inspect MKVs, extract their English subtitles,
@@ -34,6 +35,9 @@ class Backend : public QObject {
     Q_PROPERTY(int queueFailedCount READ queueFailedCount NOTIFY stateChanged)
     Q_PROPERTY(bool batch READ batch NOTIFY stateChanged)
     Q_PROPERTY(bool batchAborted READ batchAborted NOTIFY stateChanged)
+    Q_PROPERTY(bool scanning READ scanning NOTIFY stateChanged)
+    Q_PROPERTY(bool scanFoundNothing READ scanFoundNothing NOTIFY stateChanged)
+    Q_PROPERTY(bool watchServiceActive READ watchServiceActive NOTIFY serviceStatusChanged)
 
 public:
     // The picker may be null (headless CLI); tool paths are injectable for tests.
@@ -59,14 +63,23 @@ public:
     int queueFailedCount() const { return countStates("error"); }
     bool batch() const { return m_queuePaths.size() > 1; }
     bool batchAborted() const { return m_batchAborted; }
+    bool scanning() const { return m_scanning; }
+    bool scanFoundNothing() const { return m_scanFoundNothing; }
+    bool watchServiceActive() const { return m_serviceActive; }
 
     MkvPlan plan() const { return m_plan; }
     bool toolsAvailable() const;
+    void setSettings(AppSettings *settings) { m_settings = settings; }
 
     Q_INVOKABLE void openFiles();
     Q_INVOKABLE void openFolder();
     Q_INVOKABLE void openPath(const QString &path);
     Q_INVOKABLE void openPaths(const QStringList &paths);
+    Q_INVOKABLE void scanFolders(const QStringList &folders);
+    Q_INVOKABLE void pickWatchFolder();
+    Q_INVOKABLE void pickExcludeFolder();
+    Q_INVOKABLE void setWatchServiceEnabled(bool enabled);
+    Q_INVOKABLE void refreshServiceStatus();
     Q_INVOKABLE void clean();
     Q_INVOKABLE void cancel();
     Q_INVOKABLE void reset();
@@ -75,6 +88,7 @@ public:
 signals:
     void stateChanged();
     void progressChanged();
+    void serviceStatusChanged();
 
 private:
     enum class Stage { Idle, Inspecting, Ready, Extracting, Remuxing, Done, Error };
@@ -87,6 +101,9 @@ private:
     int countStates(const char *state) const;
     void startExtraction();
     void startRemux();
+    void scanNext();
+    QString subtitleLanguage() const;
+    QString audioLanguage() const;
     void failWith(const QString &message);
     void processFinished(int code, QProcess::ExitStatus status);
     void parseRemuxOutput();
@@ -112,6 +129,24 @@ private:
     int m_queueIndex = -1;
     bool m_batchAborted = false;
 
+    // Library scan ("pick up what was missed"): probe every MKV first, then
+    // batch only the ones that still need cleaning.
+    bool m_scanning = false;
+    bool m_scanFoundNothing = false;
+    bool m_autoCleanOnce = false;
+    QStringList m_scanList;
+    QStringList m_scanAccepted;
+    int m_scanIndex = -1;
+
+    // What the open folder picker's result is for: a cleaning job, a new
+    // watched folder, or a new excluded folder.
+    enum class PickPurpose { Clean, WatchFolder, ExcludeFolder };
+    PickPurpose m_pickPurpose = PickPurpose::Clean;
+
+    QProcess m_serviceProcess;
+    bool m_serviceActive = false;
+
+    AppSettings *m_settings = nullptr;
     QString m_mkvmerge, m_mkvextract;
     QProcess m_process;
     FilePicker *m_picker;

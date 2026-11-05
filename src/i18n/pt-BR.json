@@ -20,11 +20,26 @@
   "Queued": "Na fila",
   "Cleaning…": "Limpando…",
   "Failed": "Falhou",
-  "%n subtitle track will be extracted first.": { "one": "%n faixa de legenda será extraída primeiro.", "other": "%n faixas de legenda serão extraídas primeiro." },
-  "%n other track will be removed.": { "one": "%n outra faixa será removida.", "other": "%n outras faixas serão removidas." },
-  "%n subtitle file extracted": { "one": "%n arquivo de legenda extraído", "other": "%n arquivos de legenda extraídos" },
-  "%n file cleaned": { "one": "%n arquivo limpo", "other": "%n arquivos limpos" },
-  "%n file failed": { "one": "%n arquivo falhou", "other": "%n arquivos falharam" },
+  "%n subtitle track will be extracted first.": {
+    "one": "%n faixa de legenda será extraída primeiro.",
+    "other": "%n faixas de legenda serão extraídas primeiro."
+  },
+  "%n other track will be removed.": {
+    "one": "%n outra faixa será removida.",
+    "other": "%n outras faixas serão removidas."
+  },
+  "%n subtitle file extracted": {
+    "one": "%n arquivo de legenda extraído",
+    "other": "%n arquivos de legenda extraídos"
+  },
+  "%n file cleaned": {
+    "one": "%n arquivo limpo",
+    "other": "%n arquivos limpos"
+  },
+  "%n file failed": {
+    "one": "%n arquivo falhou",
+    "other": "%n arquivos falharam"
+  },
   "Stopped early.": "Interrompido antes do fim.",
   "File %1 of %2": "Arquivo %1 de %2",
   "The original file will be replaced — it's moved to the trash if possible.": "O arquivo original será substituído — ele será movido para a lixeira se possível.",
@@ -40,14 +55,29 @@
   "Extracting subtitles…": "Extraindo legendas…",
   "Writing cleaned file…": "Gravando arquivo limpo…",
   "This file could not be read.": "Não foi possível ler este arquivo.",
-  "No English audio track in this file.": "Este arquivo não tem faixa de áudio em inglês.",
   "This is not an MKV file.": "Este não é um arquivo MKV.",
   "Extracting the subtitles failed.": "Falha ao extrair as legendas.",
   "Remuxing failed.": "Falha ao remuxar.",
-  "Could not move the finished file into place.": "Não foi possível mover o arquivo final.",
-  "Could not replace the original file.": "Não foi possível substituir o arquivo original.",
   "MKVToolNix (mkvmerge, mkvextract) is not installed.": "MKVToolNix (mkvmerge, mkvextract) não está instalado.",
   "Choose MKV files": "Escolha arquivos MKV",
   "Choose a folder": "Escolha uma pasta",
-  "Open": "Abrir"
+  "Open": "Abrir",
+  "The original file is in use; the cleaned file was left as %1.": "O arquivo original está em uso; o arquivo limpo foi deixado como %1.",
+  "Settings": "Configurações",
+  "Watched folders": "Pastas monitoradas",
+  "The watch service cleans new files that appear in these folders.": "O serviço de monitoramento limpa novos arquivos que aparecem nessas pastas.",
+  "Add folder": "Adicionar pasta",
+  "Scan now": "Verificar agora",
+  "Scanning the library…": "Verificando a biblioteca…",
+  "Everything is already clean.": "Tudo já está limpo.",
+  "Audio language": "Idioma de áudio",
+  "Subtitle language": "Idioma das legendas",
+  "Watch service": "Serviço de monitoramento",
+  "running": "em execução",
+  "stopped": "parado",
+  "Enable": "Ativar",
+  "Disable": "Desativar",
+  "Excluded folders": "Pastas excluídas",
+  "Folders inside these are never watched or scanned.": "Pastas dentro destas nunca são monitoradas nem verificadas.",
+  "Exclude folder": "Excluir pasta"
 }

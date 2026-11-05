@@ -18,9 +18,12 @@ ApplicationWindow {
     Material.roundedScale: theme.radius
 
     property bool helpVisible: false
+    property bool settingsVisible: false
     property bool quitConfirmVisible: false
     readonly property bool busy: backend.state === "inspecting" || backend.state === "extracting" || backend.state === "remuxing"
     readonly property string viewName: {
+        if (backend.scanning)
+            return "working"
         if (backend.batch && win.busy)
             return "batch"
         switch (backend.state) {
@@ -49,18 +52,20 @@ ApplicationWindow {
     }
 
     Shortcut { sequence: "?"; context: Qt.ApplicationShortcut; onActivated: win.helpVisible = !win.helpVisible }
+    Shortcut { sequence: "S"; context: Qt.ApplicationShortcut; onActivated: win.settingsVisible = !win.settingsVisible }
     Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; onActivated: {
-        if (win.helpVisible || win.quitConfirmVisible) return
+        if (win.helpVisible || win.quitConfirmVisible || win.settingsVisible) return
         if (win.busy) win.quitConfirmVisible = true
         else Qt.quit()
     } }
     Shortcut { sequence: "O"; context: Qt.ApplicationShortcut; onActivated: { if (!win.busy) backend.openFiles() } }
     Shortcut { sequence: "F"; context: Qt.ApplicationShortcut; onActivated: { if (!win.busy) backend.openFolder() } }
     Shortcut { sequence: "Space"; context: Qt.ApplicationShortcut; onActivated: {
-        if (!win.busy && !win.quitConfirmVisible && !win.helpVisible) win.primaryAction()
+        if (!win.busy && !win.quitConfirmVisible && !win.helpVisible && !win.settingsVisible) win.primaryAction()
     } }
     Shortcut { sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: {
         if (win.quitConfirmVisible) win.quitConfirmVisible = false
+        else if (win.settingsVisible) win.settingsVisible = false
         else if (win.helpVisible) win.helpVisible = false
         else if (win.busy) backend.cancel()
     } }
@@ -106,6 +111,18 @@ ApplicationWindow {
                         color: "#9a9aa2"
                         elide: Label.ElideMiddle
                         Layout.maximumWidth: 400
+                    }
+                    Label {
+                        text: "⚙"
+                        font.pixelSize: 20
+                        color: gearMouse.containsMouse ? theme.accent : "#9a9aa2"
+                        MouseArea {
+                            id: gearMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: win.settingsVisible = true
+                        }
                     }
                 }
 
@@ -385,7 +402,8 @@ ApplicationWindow {
                         }
                         Label {
                             Layout.alignment: Qt.AlignHCenter
-                            text: backend.batchAborted ? qsTr("Stopped early.") : qsTr("Done")
+                            text: backend.scanFoundNothing ? qsTr("Everything is already clean.")
+                                : backend.batchAborted ? qsTr("Stopped early.") : qsTr("Done")
                             font.pixelSize: 20
                             font.bold: true
                         }
@@ -410,7 +428,7 @@ ApplicationWindow {
                         Label {
                             Layout.alignment: Qt.AlignHCenter
                             Layout.maximumWidth: 640
-                            visible: !backend.batch
+                            visible: !backend.batch && backend.outputPath !== ""
                             text: qsTr("Saved as:") + " " + backend.outputPath
                             color: "#9a9aa2"
                             elide: Label.ElideMiddle
@@ -483,6 +501,231 @@ ApplicationWindow {
 
         Rectangle {
             anchors.fill: parent
+            visible: win.settingsVisible
+            color: "#cc000000"
+            onVisibleChanged: { if (visible) backend.refreshServiceStatus() }
+
+            MouseArea {
+                anchors.fill: parent
+                onClicked: win.settingsVisible = false
+            }
+
+            Rectangle {
+                anchors.centerIn: parent
+                width: Math.min(560, parent.width - 60)
+                height: Math.min(settingsColumn.implicitHeight + 40, parent.height - 60)
+                radius: theme.radius
+                color: "#16161b"
+                border.color: "#2c2c34"
+
+                MouseArea { anchors.fill: parent } // keep clicks off the dimmer
+
+                ColumnLayout {
+                    id: settingsColumn
+                    anchors.fill: parent
+                    anchors.margins: 20
+                    spacing: 12
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label {
+                            text: qsTr("Settings")
+                            font.pixelSize: 16
+                            font.bold: true
+                        }
+                        Item { Layout.fillWidth: true }
+                        Label {
+                            text: "✕"
+                            font.pixelSize: 14
+                            color: settingsCloseMouse.containsMouse ? theme.accent : "#9a9aa2"
+                            MouseArea {
+                                id: settingsCloseMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: win.settingsVisible = false
+                            }
+                        }
+                    }
+
+                    Label {
+                        text: qsTr("Watched folders")
+                        font.bold: true
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: qsTr("The watch service cleans new files that appear in these folders.")
+                        color: "#9a9aa2"
+                        font.pixelSize: 12
+                        wrapMode: Label.Wrap
+                    }
+
+                    ListView {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: Math.min(contentHeight, 140)
+                        clip: true
+                        spacing: 4
+                        model: settings.watchFolders
+                        delegate: RowLayout {
+                            required property var modelData
+                            width: ListView.view.width
+                            spacing: 8
+                            Label {
+                                Layout.fillWidth: true
+                                text: modelData
+                                elide: Label.ElideMiddle
+                                color: "#d8d8de"
+                            }
+                            Label {
+                                text: "✕"
+                                font.pixelSize: 12
+                                color: removeMouse.containsMouse ? "#d08080" : "#9a9aa2"
+                                MouseArea {
+                                    id: removeMouse
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: settings.removeWatchFolder(modelData)
+                                }
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        spacing: 10
+                        Button {
+                            text: "+ " + qsTr("Add folder")
+                            Material.background: theme.accent
+                            Material.foreground: theme.accentForeground
+                            Material.roundedScale: theme.radius
+                            onClicked: backend.pickWatchFolder()
+                        }
+                        Button {
+                            text: qsTr("Scan now")
+                            Material.roundedScale: theme.radius
+                            enabled: !win.busy && settings.watchFolders.length > 0
+                            onClicked: {
+                                win.settingsVisible = false
+                                backend.scanFolders(settings.watchFolders)
+                            }
+                        }
+                        Item { Layout.fillWidth: true }
+                    }
+
+                    Label {
+                        text: qsTr("Excluded folders")
+                        font.bold: true
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: qsTr("Folders inside these are never watched or scanned.")
+                        color: "#9a9aa2"
+                        font.pixelSize: 12
+                        wrapMode: Label.Wrap
+                    }
+
+                    ListView {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: Math.min(contentHeight, 100)
+                        clip: true
+                        spacing: 4
+                        model: settings.excludedFolders
+                        delegate: RowLayout {
+                            required property var modelData
+                            width: ListView.view.width
+                            spacing: 8
+                            Label {
+                                Layout.fillWidth: true
+                                text: modelData
+                                elide: Label.ElideMiddle
+                                color: "#d8d8de"
+                            }
+                            Label {
+                                text: "✕"
+                                font.pixelSize: 12
+                                color: excludeRemoveMouse.containsMouse ? "#d08080" : "#9a9aa2"
+                                MouseArea {
+                                    id: excludeRemoveMouse
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: settings.removeExcludedFolder(modelData)
+                                }
+                            }
+                        }
+                    }
+
+                    Button {
+                        text: "+ " + qsTr("Exclude folder")
+                        Material.roundedScale: theme.radius
+                        onClicked: backend.pickExcludeFolder()
+                    }
+
+                    Rectangle { Layout.fillWidth: true; height: 1; color: "#2c2c34" }
+
+                    GridLayout {
+                        Layout.fillWidth: true
+                        columns: 2
+                        columnSpacing: 16
+                        rowSpacing: 8
+
+                        Label { text: qsTr("Audio language") }
+                        ComboBox {
+                            Layout.fillWidth: true
+                            model: settings.languageModel
+                            textRole: "name"
+                            valueRole: "code"
+                            currentIndex: Qt.binding(() => {
+                                for (let i = 0; i < settings.languageModel.length; ++i)
+                                    if (settings.languageModel[i].code === settings.audioLanguage)
+                                        return i
+                                return 0
+                            })
+                            onActivated: settings.setAudioLanguage(currentValue)
+                        }
+
+                        Label { text: qsTr("Subtitle language") }
+                        ComboBox {
+                            Layout.fillWidth: true
+                            model: settings.languageModel
+                            textRole: "name"
+                            valueRole: "code"
+                            currentIndex: Qt.binding(() => {
+                                for (let i = 0; i < settings.languageModel.length; ++i)
+                                    if (settings.languageModel[i].code === settings.subtitleLanguage)
+                                        return i
+                                return 0
+                            })
+                            onActivated: settings.setSubtitleLanguage(currentValue)
+                        }
+                    }
+
+                    Rectangle { Layout.fillWidth: true; height: 1; color: "#2c2c34" }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+                        Label {
+                            text: qsTr("Watch service")
+                            font.bold: true
+                        }
+                        Label {
+                            text: backend.watchServiceActive ? qsTr("running") : qsTr("stopped")
+                            color: backend.watchServiceActive ? theme.accent : "#9a9aa2"
+                        }
+                        Item { Layout.fillWidth: true }
+                        Button {
+                            text: backend.watchServiceActive ? qsTr("Disable") : qsTr("Enable")
+                            Material.roundedScale: theme.radius
+                            onClicked: backend.setWatchServiceEnabled(!backend.watchServiceActive)
+                        }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            anchors.fill: parent
             visible: win.helpVisible
             color: "#cc000000"
 
@@ -524,6 +767,8 @@ ApplicationWindow {
                         Label { Layout.fillWidth: true; text: qsTr("Open files"); wrapMode: Label.Wrap }
                         Label { text: "F"; font.bold: true; color: theme.accent }
                         Label { Layout.fillWidth: true; text: qsTr("Open folder"); wrapMode: Label.Wrap }
+                        Label { text: "S"; font.bold: true; color: theme.accent }
+                        Label { Layout.fillWidth: true; text: qsTr("Settings"); wrapMode: Label.Wrap }
                         Label { text: "Esc"; font.bold: true; color: theme.accent }
                         Label { Layout.fillWidth: true; text: qsTr("Cancel"); wrapMode: Label.Wrap }
                         Label { text: "?"; font.bold: true; color: theme.accent }

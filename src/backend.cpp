@@ -9,6 +9,7 @@
 #include <QUrl>
 
 #include "filepicker.h"
+#include "settings.h"
 
 Backend::Backend(FilePicker *picker, QObject *parent, const QString &mkvmerge, const QString &mkvextract)
     : QObject(parent),
@@ -20,11 +21,32 @@ Backend::Backend(FilePicker *picker, QObject *parent, const QString &mkvmerge, c
             QStringList paths;
             for (const auto &url : urls)
                 paths.append(url.toLocalFile());
+            if (m_pickPurpose != PickPurpose::Clean) {
+                const auto purpose = m_pickPurpose;
+                m_pickPurpose = PickPurpose::Clean;
+                if (m_settings)
+                    for (const auto &path : paths) {
+                        if (purpose == PickPurpose::WatchFolder)
+                            m_settings->addWatchFolder(path);
+                        else
+                            m_settings->addExcludedFolder(path);
+                    }
+                return;
+            }
             openPaths(paths);
         });
         connect(m_picker, &FilePicker::failed, this,
                 [this](const QString &message) { failWith(message); });
     }
+
+    // The watch-service toggle in the settings panel reports through systemctl.
+    connect(&m_serviceProcess, &QProcess::finished, this, [this](int, QProcess::ExitStatus) {
+        const bool active = QString::fromLocal8Bit(m_serviceProcess.readAllStandardOutput()).trimmed() == "active";
+        if (active != m_serviceActive) {
+            m_serviceActive = active;
+            emit serviceStatusChanged();
+        }
+    });
 
     // mkvmerge reports "#GUI#progress 42%" and "#GUI#error …" on stdout.
     connect(&m_process, &QProcess::readyReadStandardOutput, this, &Backend::parseRemuxOutput);
@@ -62,12 +84,22 @@ QString Backend::sourceName() const {
 }
 
 QString Backend::statusText() const {
+    if (m_scanning)
+        return tr("Scanning the library…");
     switch (m_stage) {
     case Stage::Inspecting: return tr("Inspecting…");
     case Stage::Extracting: return tr("Extracting subtitles…");
     case Stage::Remuxing: return tr("Writing cleaned file…");
     default: return {};
     }
+}
+
+QString Backend::subtitleLanguage() const {
+    return m_settings ? m_settings->subtitleLanguage() : QStringLiteral("eng");
+}
+
+QString Backend::audioLanguage() const {
+    return m_settings ? m_settings->audioLanguage() : QStringLiteral("eng");
 }
 
 QVariantList Backend::tracks() const {
@@ -139,6 +171,31 @@ void Backend::openFolder() {
     m_picker->openFolder();
 }
 
+void Backend::pickWatchFolder() {
+    if (busy() || !toolsAvailable() || !m_picker || !m_settings)
+        return;
+    m_pickPurpose = PickPurpose::WatchFolder;
+    m_picker->openFolder();
+}
+
+void Backend::pickExcludeFolder() {
+    if (busy() || !toolsAvailable() || !m_picker || !m_settings)
+        return;
+    m_pickPurpose = PickPurpose::ExcludeFolder;
+    m_picker->openFolder();
+}
+
+void Backend::setWatchServiceEnabled(bool enabled) {
+    QProcess::execute("systemctl", {"--user", enabled ? "enable" : "disable", "--now", "mkvclean"});
+    refreshServiceStatus();
+}
+
+void Backend::refreshServiceStatus() {
+    if (m_serviceProcess.state() != QProcess::NotRunning)
+        return;
+    m_serviceProcess.start("systemctl", {"--user", "is-active", "mkvclean"});
+}
+
 void Backend::openPath(const QString &path) {
     openPaths({path});
 }
@@ -204,6 +261,49 @@ void Backend::inspect(const QString &path) {
     m_process.start(m_mkvmerge, {"-J", m_sourcePath});
 }
 
+void Backend::scanFolders(const QStringList &folders) {
+    if (busy() || !toolsAvailable())
+        return;
+    QStringList files = Mkv::collectMkvFiles(folders);
+    if (m_settings)
+        files = Mkv::withoutExcluded(files, m_settings->excludedFolders());
+    if (files.isEmpty()) {
+        m_scanFoundNothing = true;
+        setStage(Stage::Done);
+        return;
+    }
+    reset();  // start from a clean queue
+    m_scanning = true;
+    m_scanFoundNothing = false;
+    m_scanList = files;
+    m_scanAccepted.clear();
+    m_scanIndex = -1;
+    emit stateChanged();
+    scanNext();
+}
+
+void Backend::scanNext() {
+    ++m_scanIndex;
+    if (m_scanIndex >= m_scanList.size()) {
+        m_scanning = false;
+        if (m_scanAccepted.isEmpty()) {
+            m_scanFoundNothing = true;
+            setStage(Stage::Done);
+            return;
+        }
+        setStage(Stage::Idle);
+        // A single dirty file cleans straight away too; pausing for a review
+        // after an explicit scan would be odd.
+        if (m_scanAccepted.size() == 1)
+            m_autoCleanOnce = true;
+        openPaths(m_scanAccepted);
+        return;
+    }
+    m_progress = m_scanIndex * 100 / m_scanList.size();
+    emit progressChanged();
+    inspect(m_scanList.at(m_scanIndex));
+}
+
 void Backend::clean() {
     if (m_stage != Stage::Ready)
         return;
@@ -224,7 +324,8 @@ void Backend::startExtraction() {
     for (const int id : m_plan.extractSubtitleIds) {
         const MkvTrack *track = m_plan.track(id);
         const int groupIndex = groupIndices[static_cast<int>(Mkv::subtitleClass(*track))]++;
-        const QString target = Mkv::availablePath(Mkv::subtitleFileName(m_sourcePath, *track, groupIndex));
+        const QString target = Mkv::availablePath(
+            Mkv::subtitleFileName(m_sourcePath, *track, groupIndex, subtitleLanguage()));
         m_extractJobs.append({id, target});
     }
     setStage(Stage::Extracting);
@@ -233,10 +334,11 @@ void Backend::startExtraction() {
 
 void Backend::startRemux() {
     // The cleaned file replaces the original in place. mkvmerge writes
-    // straight to its destination, so the remux goes to a ".part" name first:
-    // a failed or cancelled run then leaves the original untouched.
+    // straight to its destination, so the remux goes to a ".remux" name
+    // first: a failed or cancelled run then leaves the original untouched,
+    // and a blocked swap keeps the verified remux for a later retry.
     m_outputPath = m_sourcePath;
-    m_partialPath = m_sourcePath + ".part";
+    m_partialPath = m_sourcePath + ".remux";
     QFile::remove(m_partialPath);  // stale leftover from an earlier crash
     setStage(Stage::Remuxing);
     m_process.start(m_mkvmerge, Mkv::remuxArguments(m_sourcePath, m_partialPath, m_plan));
@@ -267,6 +369,12 @@ void Backend::reset() {
     m_queueKeptAudioIds.clear();
     m_queueIndex = -1;
     m_batchAborted = false;
+    m_scanning = false;
+    m_scanFoundNothing = false;
+    m_autoCleanOnce = false;
+    m_scanList.clear();
+    m_scanAccepted.clear();
+    m_scanIndex = -1;
     m_progress = 0;
     emit progressChanged();
     setStage(Stage::Idle);
@@ -310,21 +418,30 @@ void Backend::processFinished(int code, QProcess::ExitStatus status) {
     switch (m_stage) {
     case Stage::Inspecting: {
         const QByteArray output = m_process.readAllStandardOutput();
+        if (m_scanning) {
+            // A scan probe: keep the file only if it would actually change.
+            if (!failed) {
+                const auto plan = Mkv::makePlan(Mkv::parseTracks(QJsonDocument::fromJson(output)),
+                                                subtitleLanguage(), audioLanguage());
+                if (plan.removedCount() > 0 || !plan.extractSubtitleIds.isEmpty())
+                    m_scanAccepted.append(m_scanList.at(m_scanIndex));
+            }
+            scanNext();
+            return;
+        }
         if (failed) {
             recordQueueError(tr("This file could not be read."));
             return;
         }
-        m_plan = Mkv::makePlan(Mkv::parseTracks(QJsonDocument::fromJson(output)));
+        m_plan = Mkv::makePlan(Mkv::parseTracks(QJsonDocument::fromJson(output)),
+                               subtitleLanguage(), audioLanguage());
         if (m_plan.tracks.isEmpty()) {
             recordQueueError(tr("This file could not be read."));
             return;
         }
-        if (!m_plan.error.isEmpty()) {
-            recordQueueError(tr("No English audio track in this file."));
-            return;
-        }
-        if (batch()) {
+        if (batch() || m_autoCleanOnce) {
             // No review step in a batch: straight to the work.
+            m_autoCleanOnce = false;
             m_progress = 0;
             emit progressChanged();
             m_toolError.clear();
@@ -347,22 +464,19 @@ void Backend::processFinished(int code, QProcess::ExitStatus status) {
         m_extractJobs.clear();
         startRemux();
         return;
-    case Stage::Remuxing:
+    case Stage::Remuxing: {
         if (failed) {
             QFile::remove(m_partialPath);
             recordQueueError(m_toolError.isEmpty() ? tr("Remuxing failed.") : m_toolError);
             return;
         }
-        // The remux verified good, so the original goes now: to the trash when
-        // the desktop offers one, deleted otherwise — replacing it in place is
-        // the point of the app.
-        if (!QFile::moveToTrash(m_sourcePath) && !QFile::remove(m_sourcePath)) {
-            QFile::remove(m_partialPath);
-            recordQueueError(tr("Could not replace the original file."));
-            return;
-        }
-        if (!QFile::rename(m_partialPath, m_outputPath)) {
-            recordQueueError(tr("Could not move the finished file into place."));
+        // The remux verified good, so the original goes now. When something
+        // has the original busy (an Emby scan, a player, permissions), the
+        // ".remux" file stays behind; the watch service completes the swap on
+        // a later pass.
+        QString swapError;
+        if (!Mkv::replaceOriginal(m_sourcePath, m_partialPath, &swapError)) {
+            recordQueueError(tr("The original file is in use; the cleaned file was left as %1.").arg(m_partialPath));
             return;
         }
         m_queueStates[m_queueIndex] = "done";
@@ -375,6 +489,7 @@ void Backend::processFinished(int code, QProcess::ExitStatus status) {
         }
         setStage(Stage::Done);
         return;
+    }
     default:
         return;
     }

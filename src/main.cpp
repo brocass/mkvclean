@@ -14,6 +14,7 @@
 #include "backend.h"
 #include "cli.h"
 #include "portalfilepicker.h"
+#include "settings.h"
 #include "theme.h"
 #include "translator.h"
 
@@ -37,6 +38,11 @@ int main(int argc, char *argv[]) {
         }
         return runClean(app, inputs, json);
     }
+    if (arguments.size() >= 2 && arguments.at(1) == "watch") {
+        QCoreApplication app(argc, argv);
+        QCoreApplication::setApplicationName("mkvclean");
+        return runWatch(app, arguments.mid(2));
+    }
     if (arguments.size() >= 3 && arguments.at(1) == "skill" && arguments.at(2) == "install") {
         QCoreApplication app(argc, argv);
         QCoreApplication::setApplicationName("mkvclean");
@@ -45,7 +51,7 @@ int main(int argc, char *argv[]) {
 
     QGuiApplication app(argc, argv);
     app.setApplicationName("mkvclean");
-    app.setApplicationVersion("0.3.4");
+    app.setApplicationVersion("0.5.1");
 
     // Matches the window to mkvclean.desktop, so the compositor (Wayland
     // app_id) and the launcher pick up the installed icon.
@@ -60,14 +66,17 @@ int main(int argc, char *argv[]) {
     app.installTranslator(&translator);
 
     Theme theme;
+    AppSettings settings;
     PortalFilePicker picker;
     Backend backend(&picker);
+    backend.setSettings(&settings);
 
     QQmlApplicationEngine engine;
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
     engine.rootContext()->setContextProperty("translator", &translator);
     engine.rootContext()->setContextProperty("theme", &theme);
     engine.rootContext()->setContextProperty("backend", &backend);
+    engine.rootContext()->setContextProperty("settings", &settings);
     engine.load(QUrl("qrc:/Main.qml"));
     if (engine.rootObjects().isEmpty())
         return 1;
