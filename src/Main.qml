@@ -314,12 +314,12 @@ ApplicationWindow {
                             property real pendingRestorePosition: -1.0
 
                             function requestRemove(index) {
-                                pendingRestorePosition = position
+                                reviewList.pendingRestorePosition = reviewList.contentY
                                 backend.removeFromQueue(index)
                                 Qt.callLater(function () {
-                                    if (pendingRestorePosition >= 0) {
-                                        position = pendingRestorePosition
-                                        pendingRestorePosition = -1.0
+                                    if (reviewList.pendingRestorePosition > -1) {
+                                        reviewList.contentY = reviewList.pendingRestorePosition
+                                        reviewList.pendingRestorePosition = -1.0
                                     }
                                 })
                             }
@@ -502,12 +502,12 @@ ApplicationWindow {
                             property real pendingRestorePosition: -1.0
 
                             function requestRemove(index) {
-                                pendingRestorePosition = position
+                                batchList.pendingRestorePosition = batchList.contentY
                                 backend.removeFromQueue(index)
                                 Qt.callLater(function () {
-                                    if (pendingRestorePosition >= 0) {
-                                        position = pendingRestorePosition
-                                        pendingRestorePosition = -1.0
+                                    if (batchList.pendingRestorePosition > -1) {
+                                        batchList.contentY = batchList.pendingRestorePosition
+                                        batchList.pendingRestorePosition = -1.0
                                     }
                                 })
                             }
