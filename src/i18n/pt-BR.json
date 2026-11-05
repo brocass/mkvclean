@@ -79,5 +79,15 @@
   "Disable": "Desativar",
   "Excluded folders": "Pastas excluídas",
   "Folders inside these are never watched or scanned.": "Pastas dentro destas nunca são monitoradas nem verificadas.",
-  "Exclude folder": "Excluir pasta"
+  "Exclude folder": "Excluir pasta",
+  "%n file to clean": {
+    "one": "%n arquivo para limpar",
+    "other": "%n arquivos para limpar"
+  },
+  "Remove files from the list to leave them untouched.": "Remova arquivos da lista para deixá-los como estão.",
+  "Clean %n files": {
+    "one": "Limpar %n arquivo",
+    "other": "Limpar %n arquivos"
+  },
+  "Discard": "Descartar"
 }

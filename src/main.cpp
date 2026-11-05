@@ -51,7 +51,7 @@ int main(int argc, char *argv[]) {
 
     QGuiApplication app(argc, argv);
     app.setApplicationName("mkvclean");
-    app.setApplicationVersion("0.5.1");
+    app.setApplicationVersion("0.5.5");
 
     // Matches the window to mkvclean.desktop, so the compositor (Wayland
     // app_id) and the launcher pick up the installed icon.
@@ -70,6 +70,7 @@ int main(int argc, char *argv[]) {
     PortalFilePicker picker;
     Backend backend(&picker);
     backend.setSettings(&settings);
+    backend.setReviewAfterScan(true);
 
     QQmlApplicationEngine engine;
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);

@@ -251,13 +251,14 @@ QStringList Mkv::collectMkvFiles(const QStringList &paths) {
         }
     }
     files.removeDuplicates();
-    const QCollator collator = [] {
-        QCollator c;
-        c.setNumericMode(true);
-        return c;
-    }();
-    std::sort(files.begin(), files.end(), collator);
+    sortNaturally(files);
     return files;
+}
+
+void Mkv::sortNaturally(QStringList &paths) {
+    QCollator collator;
+    collator.setNumericMode(true);
+    std::sort(paths.begin(), paths.end(), collator);
 }
 
 QStringList Mkv::extractArguments(const QString &inputPath, const MkvExtractJobs &jobs) {

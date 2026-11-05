@@ -79,5 +79,15 @@
   "Disable": "Désactiver",
   "Excluded folders": "Dossiers exclus",
   "Folders inside these are never watched or scanned.": "Les dossiers qu'ils contiennent ne sont jamais surveillés ni analysés.",
-  "Exclude folder": "Exclure un dossier"
+  "Exclude folder": "Exclure un dossier",
+  "%n file to clean": {
+    "one": "%n fichier à nettoyer",
+    "other": "%n fichiers à nettoyer"
+  },
+  "Remove files from the list to leave them untouched.": "Retirez des fichiers de la liste pour les laisser intacts.",
+  "Clean %n files": {
+    "one": "Nettoyer %n fichier",
+    "other": "Nettoyer %n fichiers"
+  },
+  "Discard": "Tout abandonner"
 }

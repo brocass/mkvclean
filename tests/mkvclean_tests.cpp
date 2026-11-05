@@ -755,7 +755,117 @@ private slots:
         QVERIFY(!QFile::exists(dir.filePath("Music Videos/mv.en.srt")));
     }
 
+    void backendInspectTimeoutReportsUnreadable()
+    {
+        QTemporaryDir dir;
+        write(dir.filePath("movie.mkv"), "");
+        // A "mkvmerge" that hangs forever: the timeout must kill the probe.
+        Backend backend(nullptr, nullptr, makeSleepTool(dir.path()), "/bin/true", 200);
+        backend.openPath(dir.filePath("movie.mkv"));
+        QTRY_COMPARE(backend.state(), QString("error"));
+        QCOMPARE(backend.errorText(), QString("This file could not be read."));
+    }
+
+    void backendScanTimeoutSkipsHungFiles()
+    {
+        QTemporaryDir dir;
+        write(dir.filePath("movie.mkv"), "");
+        Backend backend(nullptr, nullptr, makeSleepTool(dir.path()), "/bin/true", 200);
+        backend.scanFolders({dir.path()});
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("done"), 15000);
+        QVERIFY(backend.scanFoundNothing());
+    }
+
+    void backendScanCancelStopsImmediately()
+    {
+        QTemporaryDir dir;
+        write(dir.filePath("movie.mkv"), "");
+        Backend backend(nullptr, nullptr, makeSleepTool(dir.path()), "/bin/true", 30000);
+        backend.scanFolders({dir.path()});
+        QVERIFY(backend.scanning());
+        backend.cancel();
+        QTRY_COMPARE(backend.state(), QString("idle"));
+        QVERIFY(!backend.scanning());
+    }
+
+    void backendScanReviewTrimsTheList()
+    {
+        const QString mkvmerge = QStandardPaths::findExecutable("mkvmerge");
+        const QString mkvextract = QStandardPaths::findExecutable("mkvextract");
+        const QString ffmpeg = QStandardPaths::findExecutable("ffmpeg");
+        if (mkvmerge.isEmpty() || mkvextract.isEmpty() || ffmpeg.isEmpty())
+            QSKIP("needs ffmpeg and MKVToolNix");
+
+        QTemporaryDir dir;
+        const QString keep = makeSampleMkv(dir.path(), ffmpeg, mkvmerge, "a-keep.mkv");
+        const QString clean = makeSampleMkv(dir.path(), ffmpeg, mkvmerge, "b-clean.mkv");
+        QVERIFY2(!keep.isEmpty() && !clean.isEmpty(), "could not build the sample MKVs");
+
+        Backend backend(nullptr, nullptr, mkvmerge, mkvextract);
+        backend.setReviewAfterScan(true);
+        backend.scanFolders({dir.path()});
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("review"), 60000);
+        QCOMPARE(backend.queueCount(), 2);
+
+        // Each review row carries the track plan from its probe, for the
+        // expandable details view.
+        const auto rows = backend.queue();
+        for (const auto &row : rows) {
+            const auto rowTracks = row.toMap().value("tracks").toList();
+            QVERIFY(!rowTracks.isEmpty());
+            QVERIFY(row.toMap().value("action").isNull());
+        }
+
+        // The anomaly stays as it is; the rest gets processed. (Queue order
+        // is probe-completion order, so find it by path.)
+        int keepIndex = -1;
+        const auto queue = backend.queue();
+        for (int i = 0; i < queue.size(); ++i)
+            if (queue.at(i).toMap().value("path").toString() == keep)
+                keepIndex = i;
+        QVERIFY(keepIndex >= 0);
+        backend.removeFromQueue(keepIndex);
+        QCOMPARE(backend.queueCount(), 1);
+        backend.startBatch();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("done"), 60000);
+
+        QCOMPARE(Mkv::parseTracks(inspect(mkvmerge, clean)).size(), 2);
+        QCOMPARE(Mkv::parseTracks(inspect(mkvmerge, keep)).size(), 4);
+    }
+
+    void backendScanReviewEmptiesToIdle()
+    {
+        const QString mkvmerge = QStandardPaths::findExecutable("mkvmerge");
+        const QString mkvextract = QStandardPaths::findExecutable("mkvextract");
+        const QString ffmpeg = QStandardPaths::findExecutable("ffmpeg");
+        if (mkvmerge.isEmpty() || mkvextract.isEmpty() || ffmpeg.isEmpty())
+            QSKIP("needs ffmpeg and MKVToolNix");
+
+        QTemporaryDir dir;
+        QVERIFY2(!makeSampleMkv(dir.path(), ffmpeg, mkvmerge, "only.mkv").isEmpty(),
+                 "could not build the sample MKV");
+
+        Backend backend(nullptr, nullptr, mkvmerge, mkvextract);
+        backend.setReviewAfterScan(true);
+        backend.scanFolders({dir.path()});
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("review"), 60000);
+        QCOMPARE(backend.queueCount(), 1);
+
+        backend.removeFromQueue(0);
+        QCOMPARE(backend.queueCount(), 0);
+        QCOMPARE(backend.state(), QString("idle"));
+    }
+
 private:
+    // A fake "mkvmerge" that hangs forever, for timeout tests.
+    QString makeSleepTool(const QString &directory)
+    {
+        const QString path = QDir(directory).filePath("mkvmerge-fake");
+        write(path, "#!/bin/sh\nexec sleep 600\n");
+        QFile::setPermissions(path, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        return path;
+    }
+
     static MkvTrack audio(int id, const QString &language, bool isDefault)
     {
         MkvTrack track;

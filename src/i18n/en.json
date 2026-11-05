@@ -1,7 +1,30 @@
 {
-  "%n subtitle track will be extracted first.": { "one": "%n subtitle track will be extracted first.", "other": "%n subtitle tracks will be extracted first." },
-  "%n other track will be removed.": { "one": "%n other track will be removed.", "other": "%n other tracks will be removed." },
-  "%n subtitle file extracted": { "one": "%n subtitle file extracted", "other": "%n subtitle files extracted" },
-  "%n file cleaned": { "one": "%n file cleaned", "other": "%n files cleaned" },
-  "%n file failed": { "one": "%n file failed", "other": "%n files failed" }
+  "%n subtitle track will be extracted first.": {
+    "one": "%n subtitle track will be extracted first.",
+    "other": "%n subtitle tracks will be extracted first."
+  },
+  "%n other track will be removed.": {
+    "one": "%n other track will be removed.",
+    "other": "%n other tracks will be removed."
+  },
+  "%n subtitle file extracted": {
+    "one": "%n subtitle file extracted",
+    "other": "%n subtitle files extracted"
+  },
+  "%n file cleaned": {
+    "one": "%n file cleaned",
+    "other": "%n files cleaned"
+  },
+  "%n file failed": {
+    "one": "%n file failed",
+    "other": "%n files failed"
+  },
+  "%n file to clean": {
+    "one": "%n file to clean",
+    "other": "%n files to clean"
+  },
+  "Clean %n files": {
+    "one": "Clean %n file",
+    "other": "Clean %n files"
+  }
 }

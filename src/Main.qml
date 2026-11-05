@@ -32,6 +32,8 @@ ApplicationWindow {
             return "idle"
         case "ready":
             return "ready"
+        case "review":
+            return "review"
         case "extracting":
         case "remuxing":
             return "working"
@@ -47,6 +49,8 @@ ApplicationWindow {
             backend.openFiles()
         else if (backend.state === "ready")
             backend.clean()
+        else if (backend.state === "review")
+            backend.startBatch()
         else if (backend.state === "done" || backend.state === "error")
             backend.reset()
     }
@@ -106,7 +110,7 @@ ApplicationWindow {
                     }
                     Item { Layout.fillWidth: true }
                     Label {
-                        visible: text !== "" && !backend.batch
+                        visible: text !== "" && !backend.batch && !backend.scanning
                         text: backend.sourceName
                         color: "#9a9aa2"
                         elide: Label.ElideMiddle
@@ -129,7 +133,7 @@ ApplicationWindow {
                 StackLayout {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    currentIndex: ["idle", "ready", "batch", "working", "done", "error"].indexOf(win.viewName)
+                    currentIndex: ["idle", "ready", "review", "batch", "working", "done", "error"].indexOf(win.viewName)
 
                     // --- Idle / inspecting: the drop target -------------------
                     Rectangle {
@@ -281,6 +285,183 @@ ApplicationWindow {
                         }
                     }
 
+                    // --- Review: trim the list before cleaning ----------------
+                    ColumnLayout {
+                        spacing: 12
+
+                        Label {
+                            text: qsTr("%n file to clean", "", backend.queueCount)
+                            font.pixelSize: 16
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: qsTr("Remove files from the list to leave them untouched.")
+                            color: "#9a9aa2"
+                            font.pixelSize: 12
+                            wrapMode: Label.Wrap
+                        }
+
+                        ListView {
+                            id: reviewList
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            clip: true
+                            spacing: 6
+                            model: backend.queue
+                            property int expandedIndex: -1
+
+                            Connections {
+                                target: backend
+                                function onStateChanged() { reviewList.expandedIndex = -1 }
+                            }
+
+                            delegate: Rectangle {
+                                required property var modelData
+                                required property int index
+                                property bool expanded: index === reviewList.expandedIndex
+                                width: ListView.view.width
+                                // One deterministic height: title plus, when
+                                // expanded, the fixed-size details box. The
+                                // delegate's clip produces the slide.
+                                height: 16 + titleItem.implicitHeight +
+                                        (expanded ? 8 + detailsItem.height : 0)
+                                radius: Math.min(4, theme.radius)
+                                color: "#16161b"
+                                clip: true
+
+                                Behavior on height {
+                                    NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+                                }
+
+                                Item {
+                                    id: titleItem
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    anchors.margins: 8
+                                    implicitHeight: titleRow.implicitHeight
+
+                                    RowLayout {
+                                        id: titleRow
+                                        anchors.fill: parent
+                                        spacing: 10
+
+                                        Label {
+                                            text: reviewList.expandedIndex === index ? "▾" : "▸"
+                                            font.pixelSize: 12
+                                            color: "#9a9aa2"
+                                        }
+                                        Label {
+                                            Layout.fillWidth: true
+                                            text: modelData.name
+                                            elide: Label.ElideMiddle
+                                            color: "#d8d8de"
+                                        }
+                                        Label {
+                                            text: "✕"
+                                            font.pixelSize: 13
+                                            color: reviewRemoveMouse.containsMouse ? "#d08080" : "#9a9aa2"
+                                            MouseArea {
+                                                id: reviewRemoveMouse
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: backend.removeFromQueue(index)
+                                            }
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        // Under the row's controls: clicks anywhere
+                                        // except the ✕ toggle the details.
+                                        anchors.fill: parent
+                                        z: -1
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: reviewList.expandedIndex =
+                                            reviewList.expandedIndex === index ? -1 : index
+                                    }
+                                }
+
+                                Item {
+                                    id: detailsItem
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.top: titleItem.bottom
+                                    anchors.topMargin: 8
+                                    height: detailsBox.height
+
+                                    Rectangle {
+                                        id: detailsBox
+                                        width: parent.width
+                                        height: tracksColumn.implicitHeight + 16
+                                        radius: Math.min(4, theme.radius)
+                                        color: "#101014"
+                                        border.color: "#2c2c34"
+
+                                        ColumnLayout {
+                                            id: tracksColumn
+                                            anchors.left: parent.left
+                                            anchors.right: parent.right
+                                            anchors.top: parent.top
+                                            anchors.margins: 8
+                                            spacing: 4
+
+                                            Repeater {
+                                                model: modelData.tracks
+
+                                                delegate: RowLayout {
+                                                    required property var modelData
+                                                    Layout.fillWidth: true
+                                                    spacing: 8
+
+                                                    Label {
+                                                        Layout.fillWidth: true
+                                                        text: (modelData.type === "video" ? qsTr("Video")
+                                                             : modelData.type === "audio" ? qsTr("Audio")
+                                                             : qsTr("Subtitles")) + " · " +
+                                                              [modelData.codec, modelData.language, modelData.name]
+                                                                  .filter(part => part !== "").join(" · ") +
+                                                              (modelData.isForced ? " · " + qsTr("forced")
+                                                               : modelData.isSdh ? " · sdh" : "")
+                                                        elide: Label.ElideRight
+                                                        font.pixelSize: 12
+                                                        color: "#c8c8d0"
+                                                    }
+                                                    Label {
+                                                        text: modelData.action === "keep" ? qsTr("Keep")
+                                                            : modelData.action === "extract" ? qsTr("Extract")
+                                                            : qsTr("Remove")
+                                                        font.pixelSize: 12
+                                                        font.bold: modelData.action === "keep"
+                                                        color: modelData.action === "keep" ? theme.accent
+                                                             : modelData.action === "extract" ? "#e8e8ee" : "#d08080"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        RowLayout {
+                            spacing: 10
+                            Button {
+                                text: qsTr("Discard")
+                                Material.roundedScale: theme.radius
+                                onClicked: backend.reset()
+                            }
+                            Item { Layout.fillWidth: true }
+                            Button {
+                                text: qsTr("Clean %n files", "", backend.queueCount)
+                                Material.background: theme.accent
+                                Material.foreground: theme.accentForeground
+                                Material.roundedScale: theme.radius
+                                onClicked: backend.startBatch()
+                            }
+                        }
+                    }
+
                     // --- Batch: the queue chewing through files ---------------
                     ColumnLayout {
                         spacing: 12
@@ -303,6 +484,7 @@ ApplicationWindow {
 
                             delegate: Rectangle {
                                 required property var modelData
+                                required property int index
                                 width: ListView.view.width
                                 height: queueRow.implicitHeight + 16
                                 radius: Math.min(4, theme.radius)
@@ -319,6 +501,19 @@ ApplicationWindow {
                                         text: modelData.name
                                         elide: Label.ElideMiddle
                                         color: modelData.state === "pending" ? "#8a8a92" : "#d8d8de"
+                                    }
+                                    Label {
+                                        visible: modelData.state === "pending"
+                                        text: "✕"
+                                        font.pixelSize: 13
+                                        color: queueRemoveMouse.containsMouse ? "#d08080" : "#6a6a72"
+                                        MouseArea {
+                                            id: queueRemoveMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: backend.removeFromQueue(index)
+                                        }
                                     }
                                     Rectangle {
                                         radius: Math.min(4, theme.radius)
@@ -353,47 +548,74 @@ ApplicationWindow {
                     }
 
                     // --- Working: one file, extraction then the remux ---------
-                    ColumnLayout {
-                        spacing: 14
+                    Item {
+                        ColumnLayout {
+                            anchors.centerIn: parent
+                            width: Math.min(560, parent.width - 60)
+                            spacing: 14
 
-                        Item { Layout.fillHeight: true }
-                        BusyIndicator {
-                            Layout.alignment: Qt.AlignHCenter
-                            visible: backend.state === "extracting"
-                            running: visible
+                            BusyIndicator {
+                                Layout.alignment: Qt.AlignHCenter
+                                visible: backend.state === "extracting"
+                                running: visible
+                            }
+                            Label {
+                                Layout.alignment: Qt.AlignHCenter
+                                text: backend.statusText
+                                font.pixelSize: 16
+                            }
+                            Label {
+                                Layout.alignment: Qt.AlignHCenter
+                                visible: backend.scanning
+                                text: qsTr("File %1 of %2").arg(backend.scanIndex).arg(backend.scanTotal)
+                                color: "#c8c8d0"
+                            }
+                            Label {
+                                id: scanFileLabel
+                                // A fixed box, refreshed once a second: it shows
+                                // the scan is alive without the text strobing.
+                                Layout.fillWidth: true
+                                visible: backend.scanning
+                                elide: Label.ElideRight
+                                horizontalAlignment: Label.AlignHCenter
+                                color: "#9a9aa2"
+                                property string currentName: ""
+                                text: currentName
+                                Timer {
+                                    interval: 1000
+                                    running: backend.scanning
+                                    repeat: true
+                                    onRunningChanged: if (running) scanFileLabel.currentName = backend.sourceName
+                                    onTriggered: scanFileLabel.currentName = backend.sourceName
+                                }
+                            }
+                            ProgressBar {
+                                Layout.fillWidth: true
+                                indeterminate: backend.state === "extracting"
+                                value: backend.progress / 100
+                            }
+                            Label {
+                                Layout.alignment: Qt.AlignHCenter
+                                visible: backend.state === "remuxing"
+                                text: backend.progress + "%"
+                                color: "#9a9aa2"
+                            }
+                            Button {
+                                Layout.alignment: Qt.AlignHCenter
+                                text: qsTr("Cancel")
+                                Material.roundedScale: theme.radius
+                                onClicked: backend.cancel()
+                            }
                         }
-                        Label {
-                            Layout.alignment: Qt.AlignHCenter
-                            text: backend.statusText
-                            font.pixelSize: 16
-                        }
-                        ProgressBar {
-                            Layout.fillWidth: true
-                            Layout.maximumWidth: 420
-                            Layout.alignment: Qt.AlignHCenter
-                            indeterminate: backend.state === "extracting"
-                            value: backend.progress / 100
-                        }
-                        Label {
-                            Layout.alignment: Qt.AlignHCenter
-                            visible: backend.state === "remuxing"
-                            text: backend.progress + "%"
-                            color: "#9a9aa2"
-                        }
-                        Button {
-                            Layout.alignment: Qt.AlignHCenter
-                            text: qsTr("Cancel")
-                            Material.roundedScale: theme.radius
-                            onClicked: backend.cancel()
-                        }
-                        Item { Layout.fillHeight: true }
                     }
 
                     // --- Done: what was written -------------------------------
-                    ColumnLayout {
-                        spacing: 10
+                    Item {
+                        ColumnLayout {
+                            anchors.centerIn: parent
+                            width: Math.min(640, parent.width - 60)
+                            spacing: 10
 
-                        Item { Layout.fillHeight: true }
                         Label {
                             Layout.alignment: Qt.AlignHCenter
                             text: "✓"
@@ -427,11 +649,12 @@ ApplicationWindow {
                         }
                         Label {
                             Layout.alignment: Qt.AlignHCenter
-                            Layout.maximumWidth: 640
+                            Layout.fillWidth: true
                             visible: !backend.batch && backend.outputPath !== ""
                             text: qsTr("Saved as:") + " " + backend.outputPath
                             color: "#9a9aa2"
                             elide: Label.ElideMiddle
+                            horizontalAlignment: Label.AlignHCenter
                         }
                         Repeater {
                             model: backend.batch ? backend.queue : []
@@ -462,14 +685,16 @@ ApplicationWindow {
                                 onClicked: backend.reset()
                             }
                         }
-                        Item { Layout.fillHeight: true }
+                        }
                     }
 
                     // --- Error: say what's wrong ------------------------------
-                    ColumnLayout {
-                        spacing: 14
+                    Item {
+                        ColumnLayout {
+                            anchors.centerIn: parent
+                            width: Math.min(560, parent.width - 60)
+                            spacing: 14
 
-                        Item { Layout.fillHeight: true }
                         Label {
                             Layout.alignment: Qt.AlignHCenter
                             text: "⚠"
@@ -477,8 +702,7 @@ ApplicationWindow {
                             color: "#d08080"
                         }
                         Label {
-                            Layout.alignment: Qt.AlignHCenter
-                            Layout.maximumWidth: 560
+                            Layout.fillWidth: true
                             text: backend.errorText
                             wrapMode: Label.Wrap
                             horizontalAlignment: Label.AlignHCenter
@@ -491,7 +715,7 @@ ApplicationWindow {
                             Material.roundedScale: theme.radius
                             onClicked: backend.openFiles()
                         }
-                        Item { Layout.fillHeight: true }
+                        }
                     }
                 }
             }
@@ -675,12 +899,12 @@ ApplicationWindow {
                             model: settings.languageModel
                             textRole: "name"
                             valueRole: "code"
-                            currentIndex: Qt.binding(() => {
+                            currentIndex: {
                                 for (let i = 0; i < settings.languageModel.length; ++i)
                                     if (settings.languageModel[i].code === settings.audioLanguage)
                                         return i
                                 return 0
-                            })
+                            }
                             onActivated: settings.setAudioLanguage(currentValue)
                         }
 
@@ -690,12 +914,12 @@ ApplicationWindow {
                             model: settings.languageModel
                             textRole: "name"
                             valueRole: "code"
-                            currentIndex: Qt.binding(() => {
+                            currentIndex: {
                                 for (let i = 0; i < settings.languageModel.length; ++i)
                                     if (settings.languageModel[i].code === settings.subtitleLanguage)
                                         return i
                                 return 0
-                            })
+                            }
                             onActivated: settings.setSubtitleLanguage(currentValue)
                         }
                     }

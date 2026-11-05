@@ -11,11 +11,28 @@
 #include "filepicker.h"
 #include "settings.h"
 
-Backend::Backend(FilePicker *picker, QObject *parent, const QString &mkvmerge, const QString &mkvextract)
+Backend::Backend(FilePicker *picker, QObject *parent, const QString &mkvmerge, const QString &mkvextract,
+                 int inspectTimeoutMs)
     : QObject(parent),
       m_mkvmerge(mkvmerge.isEmpty() ? QStandardPaths::findExecutable("mkvmerge") : mkvmerge),
       m_mkvextract(mkvextract.isEmpty() ? QStandardPaths::findExecutable("mkvextract") : mkvextract),
-      m_picker(picker) {
+      m_picker(picker),
+      m_inspectTimeoutMs(inspectTimeoutMs) {
+    m_inspectTimeout.setSingleShot(true);
+    m_inspectTimeout.setInterval(inspectTimeoutMs);
+    connect(&m_inspectTimeout, &QTimer::timeout, this, [this] {
+        if (m_stage == Stage::Inspecting)
+            m_process.kill();
+    });
+    // The scan pool's watchdog: kill any probe that has hung too long.
+    m_scanTick.setInterval(1000);
+    connect(&m_scanTick, &QTimer::timeout, this, [this] {
+        const auto now = QDateTime::currentDateTime();
+        for (auto it = m_scanProbeStarted.begin(); it != m_scanProbeStarted.end(); ++it)
+            if (it.value().msecsTo(now) >= m_inspectTimeoutMs)
+                it.key()->kill();
+    });
+
     if (m_picker) {
         connect(m_picker, &FilePicker::filesSelected, this, [this](const QList<QUrl> &urls) {
             QStringList paths;
@@ -71,6 +88,7 @@ QString Backend::state() const {
     case Stage::Idle: return "idle";
     case Stage::Inspecting: return "inspecting";
     case Stage::Ready: return "ready";
+    case Stage::Review: return "review";
     case Stage::Extracting: return "extracting";
     case Stage::Remuxing: return "remuxing";
     case Stage::Done: return "done";
@@ -102,15 +120,18 @@ QString Backend::audioLanguage() const {
     return m_settings ? m_settings->audioLanguage() : QStringLiteral("eng");
 }
 
-QVariantList Backend::tracks() const {
+namespace {
+// The track list the UI shows for a file: type, codec, language, flags, and
+// what the plan will do with it.
+QVariantList planTracks(const MkvPlan &plan) {
     QVariantList list;
-    for (const auto &track : m_plan.tracks) {
+    for (const auto &track : plan.tracks) {
         QString action;
         if (track.type == "video")
             action = "keep";
-        else if (track.id == m_plan.keepAudioId)
+        else if (track.id == plan.keepAudioId)
             action = "keep";
-        else if (m_plan.extractSubtitleIds.contains(track.id))
+        else if (plan.extractSubtitleIds.contains(track.id))
             action = "extract";
         else
             action = "remove";
@@ -128,6 +149,11 @@ QVariantList Backend::tracks() const {
     }
     return list;
 }
+}
+
+QVariantList Backend::tracks() const {
+    return planTracks(m_plan);
+}
 
 QVariantList Backend::queue() const {
     QVariantList list;
@@ -139,6 +165,7 @@ QVariantList Backend::queue() const {
             {"error", m_queueErrors.value(i)},
             {"subtitles", m_queueExtracted.value(i)},
             {"keptAudioId", m_queueKeptAudioIds.value(i, -1)},
+            {"tracks", m_queueTracks.value(i)},
         });
     return list;
 }
@@ -220,20 +247,26 @@ void Backend::openPaths(const QStringList &paths) {
         return;
     }
 
+    initQueue(files);
+    advance();
+}
+
+void Backend::initQueue(const QStringList &files, const QHash<QString, QVariantList> &tracksByPath) {
     m_queuePaths = files;
     m_queueStates.clear();
     m_queueErrors.clear();
     m_queueExtracted.clear();
     m_queueKeptAudioIds.clear();
+    m_queueTracks.clear();
     for (int i = 0; i < files.size(); ++i) {
         m_queueStates.append("pending");
         m_queueErrors.append(QString());
         m_queueExtracted.append(QStringList());
         m_queueKeptAudioIds.append(-1);
+        m_queueTracks.append(tracksByPath.value(files.at(i)));
     }
     m_queueIndex = -1;
     m_batchAborted = false;
-    advance();
 }
 
 void Backend::advance() {
@@ -258,6 +291,7 @@ void Backend::inspect(const QString &path) {
     m_progress = 0;
     emit progressChanged();
     setStage(Stage::Inspecting);
+    m_inspectTimeout.start();
     m_process.start(m_mkvmerge, {"-J", m_sourcePath});
 }
 
@@ -278,30 +312,136 @@ void Backend::scanFolders(const QStringList &folders) {
     m_scanList = files;
     m_scanAccepted.clear();
     m_scanIndex = -1;
+    m_scanDone = 0;
+
+    // Probes are I/O-bound, so a handful run at once: on a big library a
+    // purely sequential scan would take hours.
+    for (int i = 0; i < 4; ++i) {
+        auto *process = new QProcess(this);
+        connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+                this, [this, process](int, QProcess::ExitStatus) { probeFinished(process); });
+        connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError) {
+            probeFinished(process);
+        });
+        m_scanPool.append(process);
+    }
+    m_scanTick.start();
     emit stateChanged();
-    scanNext();
+    pumpScanPool();
 }
 
-void Backend::scanNext() {
-    ++m_scanIndex;
-    if (m_scanIndex >= m_scanList.size()) {
-        m_scanning = false;
-        if (m_scanAccepted.isEmpty()) {
-            m_scanFoundNothing = true;
-            setStage(Stage::Done);
-            return;
+void Backend::pumpScanPool() {
+    for (auto *process : m_scanPool) {
+        if (m_scanProbeFile.contains(process))
+            continue;  // busy
+        if (m_scanIndex + 1 >= m_scanList.size())
+            break;
+        ++m_scanIndex;
+        const QString file = m_scanList.at(m_scanIndex);
+        m_scanProbeFile.insert(process, file);
+        m_scanProbeStarted.insert(process, QDateTime::currentDateTime());
+        m_sourcePath = file;
+        // The stage stays Inspecting through the whole scan, so setStage
+        // alone never refreshes the file name in the UI.
+        emit stateChanged();
+        process->start(m_mkvmerge, {"-J", file});
+    }
+    if (m_scanProbeFile.isEmpty() && m_scanIndex + 1 >= m_scanList.size())
+        finishScan();
+}
+
+void Backend::probeFinished(QProcess *process) {
+    if (!m_scanProbeFile.contains(process))
+        return;
+    const QString file = m_scanProbeFile.take(process);
+    m_scanProbeStarted.remove(process);
+    if (!m_scanning)  // cancelled while this probe was in flight
+        return;
+
+    ++m_scanDone;
+    m_progress = m_scanDone * 100 / m_scanList.size();
+    emit progressChanged();
+
+    // A probe that read clean JSON keeps the file only if it would change.
+    if (process->exitCode() == 0 && process->exitStatus() == QProcess::NormalExit) {
+        const auto plan = Mkv::makePlan(Mkv::parseTracks(QJsonDocument::fromJson(process->readAllStandardOutput())),
+                                        subtitleLanguage(), audioLanguage());
+        if (plan.removedCount() > 0 || !plan.extractSubtitleIds.isEmpty()) {
+            m_scanAccepted.append(file);
+            m_scanTrackLists.insert(file, planTracks(plan));
         }
-        setStage(Stage::Idle);
-        // A single dirty file cleans straight away too; pausing for a review
-        // after an explicit scan would be odd.
-        if (m_scanAccepted.size() == 1)
-            m_autoCleanOnce = true;
-        openPaths(m_scanAccepted);
+    }
+    pumpScanPool();
+}
+
+void Backend::finishScan() {
+    m_scanTick.stop();
+    // deleteLater: finishScan runs from a pool process's own finished signal.
+    for (auto *process : m_scanPool)
+        process->deleteLater();
+    m_scanPool.clear();
+    m_scanProbeFile.clear();
+    m_scanProbeStarted.clear();
+    m_scanning = false;
+    if (m_scanAccepted.isEmpty()) {
+        m_scanFoundNothing = true;
+        setStage(Stage::Done);
         return;
     }
-    m_progress = m_scanIndex * 100 / m_scanList.size();
-    emit progressChanged();
-    inspect(m_scanList.at(m_scanIndex));
+    setStage(Stage::Idle);
+    // A single dirty file cleans straight away too; pausing for a review
+    // after an explicit scan would be odd.
+    if (m_scanAccepted.size() == 1)
+        m_autoCleanOnce = true;
+    // Accepted files are in probe-completion order; present them sorted.
+    Mkv::sortNaturally(m_scanAccepted);
+    initQueue(m_scanAccepted, m_scanTrackLists);
+    m_scanTrackLists.clear();
+    if (m_reviewAfterScan) {
+        // Let the user trim the list — dual-audio anomalies and all — before
+        // anything is processed.
+        setStage(Stage::Review);
+        return;
+    }
+    advance();
+}
+
+void Backend::startBatch() {
+    if (m_stage != Stage::Review || m_queuePaths.isEmpty())
+        return;
+    // Trimmed down to one file? Clean it straight away, no second review.
+    if (m_queuePaths.size() == 1)
+        m_autoCleanOnce = true;
+    advance();
+}
+
+void Backend::removeFromQueue(int index) {
+    if (index < 0 || index >= m_queuePaths.size())
+        return;
+    if (m_stage == Stage::Review) {
+        removeQueueRow(index);
+        if (m_queuePaths.isEmpty())
+            setStage(Stage::Idle);
+        else
+            emit stateChanged();
+        return;
+    }
+    // During the batch only future, still-pending rows can be dropped.
+    if (busy() && index > m_queueIndex && m_queueStates.at(index) == "pending") {
+        removeQueueRow(index);
+        emit stateChanged();
+    }
+}
+
+void Backend::removeQueueRow(int index) {
+    m_queuePaths.removeAt(index);
+    m_queueStates.removeAt(index);
+    m_queueErrors.removeAt(index);
+    m_queueExtracted.removeAt(index);
+    m_queueKeptAudioIds.removeAt(index);
+    m_queueTracks.removeAt(index);
+    if (index < m_queueIndex)
+        --m_queueIndex;
 }
 
 void Backend::clean() {
@@ -345,6 +485,25 @@ void Backend::startRemux() {
 }
 
 void Backend::cancel() {
+    if (m_scanning) {
+        // A cancelled scan simply stops; nothing was modified.
+        m_scanning = false;
+        m_scanTick.stop();
+        for (auto *process : m_scanPool) {
+            if (m_scanProbeFile.contains(process))
+                process->kill();
+            process->deleteLater();
+        }
+        m_scanPool.clear();
+        m_scanProbeFile.clear();
+        m_scanProbeStarted.clear();
+        m_scanList.clear();
+        m_scanAccepted.clear();
+        m_progress = 0;
+        emit progressChanged();
+        setStage(Stage::Idle);
+        return;
+    }
     if (m_stage != Stage::Extracting && m_stage != Stage::Remuxing)
         return;
     m_cancelling = true;
@@ -399,6 +558,8 @@ void Backend::recordQueueError(const QString &message) {
 }
 
 void Backend::processFinished(int code, QProcess::ExitStatus status) {
+    m_inspectTimeout.stop();
+
     if (m_cancelling) {
         m_cancelling = false;
         QFile::remove(m_partialPath);
@@ -418,17 +579,6 @@ void Backend::processFinished(int code, QProcess::ExitStatus status) {
     switch (m_stage) {
     case Stage::Inspecting: {
         const QByteArray output = m_process.readAllStandardOutput();
-        if (m_scanning) {
-            // A scan probe: keep the file only if it would actually change.
-            if (!failed) {
-                const auto plan = Mkv::makePlan(Mkv::parseTracks(QJsonDocument::fromJson(output)),
-                                                subtitleLanguage(), audioLanguage());
-                if (plan.removedCount() > 0 || !plan.extractSubtitleIds.isEmpty())
-                    m_scanAccepted.append(m_scanList.at(m_scanIndex));
-            }
-            scanNext();
-            return;
-        }
         if (failed) {
             recordQueueError(tr("This file could not be read."));
             return;

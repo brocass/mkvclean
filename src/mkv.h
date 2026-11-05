@@ -78,6 +78,9 @@ QString availablePath(const QString &desired);
 // recursively. Sorted naturally (e02 before e10), duplicates removed.
 QStringList collectMkvFiles(const QStringList &paths);
 
+// Natural (human) sort: e02 sorts before e10.
+void sortNaturally(QStringList &paths);
+
 // Paths with everything under the excluded folders dropped; a folder itself
 // matches, a sibling with a similar name ("/videos/Music" vs "/videos/Music
 // Videos") does not. Automation (watcher, scan) uses this; explicit cleans

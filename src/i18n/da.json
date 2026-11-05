@@ -79,5 +79,15 @@
   "Disable": "Deaktivér",
   "Excluded folders": "Ekskluderede mapper",
   "Folders inside these are never watched or scanned.": "Mapper i disse overvåges eller scannes aldrig.",
-  "Exclude folder": "Ekskludér mappe"
+  "Exclude folder": "Ekskludér mappe",
+  "%n file to clean": {
+    "one": "%n fil at rense",
+    "other": "%n filer at rense"
+  },
+  "Remove files from the list to leave them untouched.": "Fjern filer fra listen for at lade dem være uændrede.",
+  "Clean %n files": {
+    "one": "Rens %n fil",
+    "other": "Rens %n filer"
+  },
+  "Discard": "Kassér"
 }

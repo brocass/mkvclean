@@ -1,8 +1,10 @@
 #pragma once
 
+#include <QDateTime>
 #include <QObject>
 #include <QProcess>
 #include <QStringList>
+#include <QTimer>
 #include <QVariantList>
 
 #include "mkv.h"
@@ -37,12 +39,16 @@ class Backend : public QObject {
     Q_PROPERTY(bool batchAborted READ batchAborted NOTIFY stateChanged)
     Q_PROPERTY(bool scanning READ scanning NOTIFY stateChanged)
     Q_PROPERTY(bool scanFoundNothing READ scanFoundNothing NOTIFY stateChanged)
+    Q_PROPERTY(int scanIndex READ scanIndex NOTIFY progressChanged)
+    Q_PROPERTY(int scanTotal READ scanTotal NOTIFY stateChanged)
     Q_PROPERTY(bool watchServiceActive READ watchServiceActive NOTIFY serviceStatusChanged)
 
 public:
-    // The picker may be null (headless CLI); tool paths are injectable for tests.
+    // The picker may be null (headless CLI); tool paths and the inspect
+    // timeout are injectable for tests.
     explicit Backend(FilePicker *picker, QObject *parent = nullptr,
-                     const QString &mkvmerge = {}, const QString &mkvextract = {});
+                     const QString &mkvmerge = {}, const QString &mkvextract = {},
+                     int inspectTimeoutMs = 30000);
 
     QString state() const;
     QString sourcePath() const { return m_sourcePath; }
@@ -65,17 +71,23 @@ public:
     bool batchAborted() const { return m_batchAborted; }
     bool scanning() const { return m_scanning; }
     bool scanFoundNothing() const { return m_scanFoundNothing; }
+    int scanIndex() const { return m_scanDone; }
+    int scanTotal() const { return m_scanList.size(); }
     bool watchServiceActive() const { return m_serviceActive; }
 
     MkvPlan plan() const { return m_plan; }
     bool toolsAvailable() const;
     void setSettings(AppSettings *settings) { m_settings = settings; }
+    // GUI mode: a completed scan pauses at a review list before processing.
+    void setReviewAfterScan(bool review) { m_reviewAfterScan = review; }
 
     Q_INVOKABLE void openFiles();
     Q_INVOKABLE void openFolder();
     Q_INVOKABLE void openPath(const QString &path);
     Q_INVOKABLE void openPaths(const QStringList &paths);
     Q_INVOKABLE void scanFolders(const QStringList &folders);
+    Q_INVOKABLE void startBatch();
+    Q_INVOKABLE void removeFromQueue(int index);
     Q_INVOKABLE void pickWatchFolder();
     Q_INVOKABLE void pickExcludeFolder();
     Q_INVOKABLE void setWatchServiceEnabled(bool enabled);
@@ -91,17 +103,21 @@ signals:
     void serviceStatusChanged();
 
 private:
-    enum class Stage { Idle, Inspecting, Ready, Extracting, Remuxing, Done, Error };
+    enum class Stage { Idle, Inspecting, Ready, Review, Extracting, Remuxing, Done, Error };
 
     bool busy() const;
     void setStage(Stage stage);
+    void initQueue(const QStringList &files, const QHash<QString, QVariantList> &tracksByPath = {});
     void inspect(const QString &path);
     void advance();
+    void removeQueueRow(int index);
     void recordQueueError(const QString &message);
     int countStates(const char *state) const;
     void startExtraction();
     void startRemux();
-    void scanNext();
+    void pumpScanPool();
+    void probeFinished(QProcess *process);
+    void finishScan();
     QString subtitleLanguage() const;
     QString audioLanguage() const;
     void failWith(const QString &message);
@@ -126,6 +142,7 @@ private:
     QStringList m_queueErrors;
     QList<QStringList> m_queueExtracted;
     QList<int> m_queueKeptAudioIds;
+    QList<QVariantList> m_queueTracks;  // per-file track plan, when known (scans)
     int m_queueIndex = -1;
     bool m_batchAborted = false;
 
@@ -137,6 +154,18 @@ private:
     QStringList m_scanList;
     QStringList m_scanAccepted;
     int m_scanIndex = -1;
+    int m_scanDone = 0;
+
+    // Scan probes run a few at a time: the library is big and the probes are
+    // I/O-bound. A hung one (corrupt file, stalling disk) is killed after
+    // m_inspectTimeoutMs and skipped.
+    QList<QProcess *> m_scanPool;
+    QHash<QProcess *, QString> m_scanProbeFile;
+    QHash<QProcess *, QDateTime> m_scanProbeStarted;
+    QHash<QString, QVariantList> m_scanTrackLists;
+    QTimer m_scanTick;
+    QTimer m_inspectTimeout;
+    int m_inspectTimeoutMs;
 
     // What the open folder picker's result is for: a cleaning job, a new
     // watched folder, or a new excluded folder.
@@ -145,6 +174,7 @@ private:
 
     QProcess m_serviceProcess;
     bool m_serviceActive = false;
+    bool m_reviewAfterScan = false;
 
     AppSettings *m_settings = nullptr;
     QString m_mkvmerge, m_mkvextract;
