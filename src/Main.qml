@@ -309,6 +309,20 @@ ApplicationWindow {
                             spacing: 6
                             model: backend.queue
                             property int expandedIndex: -1
+                            // Removal re-notifies the queue; without this the list
+                            // can snap back to the top while the user trims it.
+                            property real pendingRestorePosition: -1.0
+
+                            function requestRemove(index) {
+                                pendingRestorePosition = position
+                                backend.removeFromQueue(index)
+                                Qt.callLater(function () {
+                                    if (pendingRestorePosition >= 0) {
+                                        position = pendingRestorePosition
+                                        pendingRestorePosition = -1.0
+                                    }
+                                })
+                            }
 
                             Connections {
                                 target: backend
@@ -366,7 +380,7 @@ ApplicationWindow {
                                                 anchors.fill: parent
                                                 hoverEnabled: true
                                                 cursorShape: Qt.PointingHandCursor
-                                                onClicked: backend.removeFromQueue(index)
+                                                onClicked: reviewList.requestRemove(index)
                                             }
                                         }
                                     }
@@ -476,11 +490,27 @@ ApplicationWindow {
                         }
 
                         ListView {
+                            id: batchList
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             clip: true
                             spacing: 6
                             model: backend.queue
+
+                            // Removing a queued row must not yank the user back
+                            // to the top of the list.
+                            property real pendingRestorePosition: -1.0
+
+                            function requestRemove(index) {
+                                pendingRestorePosition = position
+                                backend.removeFromQueue(index)
+                                Qt.callLater(function () {
+                                    if (pendingRestorePosition >= 0) {
+                                        position = pendingRestorePosition
+                                        pendingRestorePosition = -1.0
+                                    }
+                                })
+                            }
 
                             delegate: Rectangle {
                                 required property var modelData
@@ -512,7 +542,7 @@ ApplicationWindow {
                                             anchors.fill: parent
                                             hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor
-                                            onClicked: backend.removeFromQueue(index)
+                                            onClicked: batchList.requestRemove(index)
                                         }
                                     }
                                     Rectangle {
