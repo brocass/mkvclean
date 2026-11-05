@@ -8,10 +8,11 @@ description: Extract English subtitles from MKV files and remux them down to the
 `mkvclean clean <file-or-folder>… [--json]` does the whole job headless, for
 one file or many (folders are scanned recursively for `*.mkv`):
 
-1. Extracts every English subtitle track next to the original, tagged by
-   kind: `<name>.en.srt` (plain), `<name>.sdh.en.srt` (SDH/CC, by flag or
-   track name), `<name>.forced.en.srt` (forced); extra tracks of a kind
-   number as `<name>.2.en.srt`, `<name>.sdh.2.en.srt`, ….
+1. Extracts English subtitle tracks next to the original, tagged by kind:
+   `<name>.en.srt` (plain) and `<name>.forced.en.srt` (forced) always;
+   `<name>.sdh.en.srt` (SDH/CC, by flag or track name) only when there is no
+   plain English subtitle. Extra tracks of a kind number as
+   `<name>.2.en.srt`, `<name>.sdh.2.en.srt`, ….
 2. Replaces each original MKV in place with a remux containing the video plus
    the default English audio track only — no subtitles, no other audio, and
    no leftover track names (they are blanked so players show the language).

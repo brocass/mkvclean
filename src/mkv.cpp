@@ -43,7 +43,9 @@ QList<MkvTrack> Mkv::parseTracks(const QJsonDocument &identification) {
         track.name = properties.value("track_name").toString();
         track.isDefault = properties.value("default_track").toBool();
         track.isForced = properties.value("forced_track").toBool();
-        track.isHearingImpaired = properties.value("hearing_impaired").toBool();
+        // mkvmerge spells the flag "flag_hearing_impaired" in its JSON.
+        track.isHearingImpaired = properties.value("flag_hearing_impaired").toBool() ||
+                                  properties.value("hearing_impaired").toBool();
         if (track.id >= 0 && !track.type.isEmpty())
             tracks.append(track);
     }
@@ -54,10 +56,21 @@ MkvPlan Mkv::makePlan(const QList<MkvTrack> &tracks) {
     MkvPlan plan;
     plan.tracks = tracks;
 
-    // English subtitles are pulled out as files first; the remux drops all subs.
+    // English subtitles are pulled out as files first; the remux drops all
+    // subs. Forced always comes along, but SDH/CC is only a fallback for
+    // when there is no plain English subtitle at all.
+    bool hasPlain = false;
     for (const auto &track : tracks)
-        if (track.type == "subtitles" && track.language == "eng")
-            plan.extractSubtitleIds.append(track.id);
+        if (track.type == "subtitles" && track.language == "eng" &&
+            subtitleClass(track) == MkvSubtitleClass::Plain)
+            hasPlain = true;
+    for (const auto &track : tracks) {
+        if (track.type != "subtitles" || track.language != "eng")
+            continue;
+        if (hasPlain && subtitleClass(track) == MkvSubtitleClass::Sdh)
+            continue;
+        plan.extractSubtitleIds.append(track.id);
+    }
 
     // The default English audio track survives; without any English audio
     // there is nothing sensible to keep, so refuse rather than guess.

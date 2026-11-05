@@ -6,10 +6,10 @@ One job: pull the English subtitles out of an MKV, then remux it down to the
 video plus the default English audio track — no subtitles, no other audio,
 no leftover track names ("English [Original]" and friends are blanked, so
 players show the language instead).
-Powered by MKVToolNix (`mkvmerge`, `mkvextract`). Every English subtitle
-lands next to the file, tagged by kind — `Movie.en.srt` for the plain track,
-`Movie.sdh.en.srt` for SDH/CC, `Movie.forced.en.srt` for forced — and the
-cleaned
+Powered by MKVToolNix (`mkvmerge`, `mkvextract`). English subtitles land next
+to the file, tagged by kind — `Movie.en.srt` for the plain track,
+`Movie.sdh.en.srt` for SDH/CC (only when there is no plain English subtitle),
+`Movie.forced.en.srt` for forced (always) — and the cleaned
 file **replaces the original in place**: the remux is verified first, then
 the original is moved to the trash when the desktop offers one, so it stays
 recoverable.

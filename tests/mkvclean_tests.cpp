@@ -21,7 +21,7 @@ private slots:
             "tracks": [
                 {"id": 0, "type": "video", "codec": "AVC/H.264", "properties": {"codec_id": "V_MPEG4/ISO/AVC"}},
                 {"id": 1, "type": "audio", "codec": "AAC", "properties": {"codec_id": "A_AAC", "language": "eng", "default_track": true, "track_name": "Stereo"}},
-                {"id": 2, "type": "subtitles", "codec": "SubRip/SRT", "properties": {"codec_id": "S_TEXT/UTF8", "language": "eng", "forced_track": true, "hearing_impaired": true}}
+                {"id": 2, "type": "subtitles", "codec": "SubRip/SRT", "properties": {"codec_id": "S_TEXT/UTF8", "language": "eng", "forced_track": true, "flag_hearing_impaired": true}}
             ]
         })"));
         QCOMPARE(tracks.size(), 3);
@@ -29,7 +29,7 @@ private slots:
         QCOMPARE(tracks.at(1).name, QString("Stereo"));
         QVERIFY(tracks.at(1).isDefault);
         QVERIFY(tracks.at(2).isForced);
-        QVERIFY(tracks.at(2).isHearingImpaired);
+        QVERIFY(tracks.at(2).isHearingImpaired);  // spelled flag_hearing_impaired in real JSON
         QCOMPARE(tracks.at(2).codecId, QString("S_TEXT/UTF8"));
     }
 
@@ -68,6 +68,34 @@ private slots:
         QCOMPARE(plan.extractSubtitleIds, QList<int>({3, 4}));
         // Only the Danish subtitle vanishes without being extracted first.
         QCOMPARE(plan.removedCount(), 1);
+    }
+
+    void planSkipsSdhWhenPlainExists()
+    {
+        MkvTrack sdh = subtitles(4, "eng");
+        sdh.isHearingImpaired = true;
+        MkvTrack forced = subtitles(5, "eng");
+        forced.isForced = true;
+        const auto plan = Mkv::makePlan({
+            audio(1, "eng", true),
+            subtitles(3, "eng"), sdh, forced, subtitles(6, "dan"),
+        });
+        // Plain and forced extract; the redundant SDH is dropped with the rest.
+        QCOMPARE(plan.extractSubtitleIds, QList<int>({3, 5}));
+        QCOMPARE(plan.removedCount(), 2);
+    }
+
+    void planExtractsSdhWhenNoPlainExists()
+    {
+        MkvTrack sdh = subtitles(4, "eng");
+        sdh.isHearingImpaired = true;
+        MkvTrack sdh2 = subtitles(5, "eng");
+        sdh2.isHearingImpaired = true;
+        MkvTrack forced = subtitles(6, "eng");
+        forced.isForced = true;
+        const auto plan = Mkv::makePlan({audio(1, "eng", true), sdh, sdh2, forced});
+        QCOMPARE(plan.extractSubtitleIds, QList<int>({4, 5, 6}));
+        QCOMPARE(plan.removedCount(), 0);
     }
 
     void subtitleExtensions()
@@ -364,7 +392,7 @@ private slots:
         QCOMPARE(Mkv::parseTracks(inspect(mkvmerge, good)).size(), 2);
     }
 
-    void backendExtractsPlainSdhAndForcedNames()
+    void backendSkipsSdhWhenPlainExists()
     {
         const QString mkvmerge = QStandardPaths::findExecutable("mkvmerge");
         const QString mkvextract = QStandardPaths::findExecutable("mkvextract");
@@ -392,13 +420,14 @@ private slots:
         Backend backend(nullptr, nullptr, mkvmerge, mkvextract);
         backend.openPath(rich);
         QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("ready"), 15000);
-        // The base sample's own English subtitle rides along as plain #1.
-        QCOMPARE(backend.extractCount(), 4);
+        // Two plain (the sample's own plus plain.srt) plus forced; the SDH is
+        // skipped because plain tracks exist.
+        QCOMPARE(backend.extractCount(), 3);
 
         backend.clean();
         QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("done"), 30000);
 
-        QCOMPARE(backend.extractedFiles().size(), 4);
+        QCOMPARE(backend.extractedFiles().size(), 3);
         const auto read = [](const QString &path) {
             QFile file(path);
             return file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()) : QString();
@@ -406,12 +435,47 @@ private slots:
         const QString base = dir.filePath("rich-subs");
         QVERIFY(backend.extractedFiles().contains(base + ".en.srt"));
         QVERIFY(backend.extractedFiles().contains(base + ".2.en.srt"));
-        QVERIFY(backend.extractedFiles().contains(base + ".sdh.en.srt"));
         QVERIFY(backend.extractedFiles().contains(base + ".forced.en.srt"));
+        QVERIFY(!QFile::exists(base + ".sdh.en.srt"));
         QVERIFY(read(base + ".en.srt").contains("Hello from the English track"));
         QVERIFY(read(base + ".2.en.srt").contains("Plain line"));
-        QVERIFY(read(base + ".sdh.en.srt").contains("[sdh line]"));
         QVERIFY(read(base + ".forced.en.srt").contains("Forced line"));
+    }
+
+    void backendExtractsSdhWhenNoPlainExists()
+    {
+        const QString mkvmerge = QStandardPaths::findExecutable("mkvmerge");
+        const QString mkvextract = QStandardPaths::findExecutable("mkvextract");
+        const QString ffmpeg = QStandardPaths::findExecutable("ffmpeg");
+        if (mkvmerge.isEmpty() || mkvextract.isEmpty() || ffmpeg.isEmpty())
+            QSKIP("needs ffmpeg and MKVToolNix");
+
+        QTemporaryDir dir;
+        // Reuse the sample builder for its streams, then mux an SDH-only file:
+        // video + default English audio + one SDH subtitle, no plain.
+        QVERIFY2(!makeSampleMkv(dir.path(), ffmpeg, mkvmerge, "assets.mkv").isEmpty(),
+                 "could not build the sample streams");
+        const QString sdhSrt = dir.filePath("sdh.srt"), sdhOnly = dir.filePath("sdh-only.mkv");
+        write(sdhSrt, "1\n00:00:00,000 --> 00:00:01,500\n[sdh line]\n");
+        // No track name: detection must come from the flag alone.
+        QVERIFY(QProcess::execute(mkvmerge, {"-q", "-o", sdhOnly, dir.filePath("video.mkv"),
+                                             "--language", "0:eng", "--default-track-flag", "0:yes",
+                                             dir.filePath("eng.wav"),
+                                             "--language", "0:eng", "--hearing-impaired-flag", "0:yes",
+                                             sdhSrt}) == 0);
+
+        Backend backend(nullptr, nullptr, mkvmerge, mkvextract);
+        backend.openPath(sdhOnly);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("ready"), 15000);
+        QCOMPARE(backend.extractCount(), 1);
+
+        backend.clean();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("done"), 30000);
+
+        QCOMPARE(backend.extractedFiles(), QStringList({dir.filePath("sdh-only.sdh.en.srt")}));
+        QFile extracted(dir.filePath("sdh-only.sdh.en.srt"));
+        QVERIFY(extracted.open(QIODevice::ReadOnly));
+        QVERIFY(QString::fromUtf8(extracted.readAll()).contains("[sdh line]"));
     }
 
 private:
