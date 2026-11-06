@@ -1,5 +1,5 @@
 pkgname=mkvclean
-pkgver=0.5.13
+pkgver=0.5.14
 pkgrel=1
 pkgdesc='Extract English subtitles from MKV files and keep only the default English audio'
 arch=('x86_64' 'aarch64')

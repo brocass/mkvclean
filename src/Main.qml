@@ -785,7 +785,7 @@ ApplicationWindow {
 
             Rectangle {
                 anchors.centerIn: parent
-                width: Math.min(560, parent.width - 60)
+                width: Math.min(600, parent.width - 60)
                 height: Math.min(settingsColumn.implicitHeight + 40, parent.height - 60)
                 radius: theme.radius
                 color: "#16161b"
@@ -835,7 +835,10 @@ ApplicationWindow {
 
                         ColumnLayout {
                             id: settingsContent
-                            width: settingsScroll.availableWidth
+                            // Leave a gutter on the right: the scroll bar is
+                            // an overlay, and without this it covers the row
+                            // remove buttons and the combo box arrows.
+                            width: settingsScroll.availableWidth - 20
                             spacing: 12
 
                             Label {
