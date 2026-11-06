@@ -647,32 +647,37 @@ ApplicationWindow {
                             spacing: 10
 
                         Label {
-                            Layout.alignment: Qt.AlignHCenter
+                            Layout.fillWidth: true
+                            horizontalAlignment: Label.AlignHCenter
                             text: "✓"
                             font.pixelSize: 40
                             color: theme.accent
                         }
                         Label {
-                            Layout.alignment: Qt.AlignHCenter
+                            Layout.fillWidth: true
+                            horizontalAlignment: Label.AlignHCenter
                             text: backend.scanFoundNothing ? qsTr("Everything is already clean.")
                                 : backend.batchAborted ? qsTr("Stopped early.") : qsTr("Done")
                             font.pixelSize: 20
                             font.bold: true
                         }
                         Label {
-                            Layout.alignment: Qt.AlignHCenter
+                            Layout.fillWidth: true
+                            horizontalAlignment: Label.AlignHCenter
                             visible: backend.batch
                             text: qsTr("%n file cleaned", "", backend.queueCleanedCount)
                             color: "#c8c8d0"
                         }
                         Label {
-                            Layout.alignment: Qt.AlignHCenter
+                            Layout.fillWidth: true
+                            horizontalAlignment: Label.AlignHCenter
                             visible: backend.batch && backend.queueFailedCount > 0
                             text: qsTr("%n file failed", "", backend.queueFailedCount)
                             color: "#d08080"
                         }
                         Label {
-                            Layout.alignment: Qt.AlignHCenter
+                            Layout.fillWidth: true
+                            horizontalAlignment: Label.AlignHCenter
                             visible: !backend.batch && backend.extractedFiles.length > 0
                             text: qsTr("%n subtitle file extracted", "", backend.extractedFiles.length)
                             color: "#c8c8d0"
@@ -690,7 +695,7 @@ ApplicationWindow {
                             model: backend.batch ? backend.queue : []
                             delegate: Label {
                                 required property var modelData
-                                Layout.alignment: Qt.AlignHCenter
+                                Layout.fillWidth: true
                                 visible: modelData.state === "error"
                                 height: visible ? implicitHeight : 0
                                 text: modelData.name + " — " + modelData.error
