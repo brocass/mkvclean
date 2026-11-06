@@ -821,176 +821,195 @@ ApplicationWindow {
                         }
                     }
 
-                    Label {
-                        text: qsTr("Watched folders")
-                        font.bold: true
-                    }
-                    Label {
+                    // Only the title row stays put; everything below scrolls, so
+                    // the watch-service toggle stays reachable no matter how many
+                    // folders are listed or how short the window is.
+                    ScrollView {
+                        id: settingsScroll
                         Layout.fillWidth: true
-                        text: qsTr("The watch service cleans new files that appear in these folders.")
-                        color: "#9a9aa2"
-                        font.pixelSize: 12
-                        wrapMode: Label.Wrap
-                    }
-
-                    ListView {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: Math.min(contentHeight, 140)
+                        Layout.fillHeight: true
+                        Layout.minimumHeight: 0
+                        Layout.preferredHeight: settingsContent.implicitHeight
                         clip: true
-                        spacing: 4
-                        model: settings.watchFolders
-                        delegate: RowLayout {
-                            required property var modelData
-                            width: ListView.view.width
-                            spacing: 8
+                        background: Rectangle { color: "transparent" }
+
+                        ColumnLayout {
+                            id: settingsContent
+                            width: settingsScroll.availableWidth
+                            spacing: 12
+
+                            Label {
+                                text: qsTr("Watched folders")
+                                font.bold: true
+                            }
                             Label {
                                 Layout.fillWidth: true
-                                text: modelData
-                                elide: Label.ElideMiddle
-                                color: "#d8d8de"
-                            }
-                            Label {
-                                text: "✕"
+                                text: qsTr("The watch service cleans new files that appear in these folders.")
+                                color: "#9a9aa2"
                                 font.pixelSize: 12
-                                color: removeMouse.containsMouse ? "#d08080" : "#9a9aa2"
-                                MouseArea {
-                                    id: removeMouse
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: settings.removeWatchFolder(modelData)
+                                wrapMode: Label.Wrap
+                            }
+
+                            ListView {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: Math.min(contentHeight, 140)
+                                clip: true
+                                spacing: 4
+                                model: settings.watchFolders
+                                delegate: RowLayout {
+                                    required property var modelData
+                                    width: ListView.view.width
+                                    spacing: 8
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: modelData
+                                        elide: Label.ElideMiddle
+                                        color: "#d8d8de"
+                                    }
+                                    Label {
+                                        text: "✕"
+                                        font.pixelSize: 12
+                                        color: removeMouse.containsMouse ? "#d08080" : "#9a9aa2"
+                                        MouseArea {
+                                            id: removeMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: settings.removeWatchFolder(modelData)
+                                        }
+                                    }
                                 }
                             }
-                        }
-                    }
 
-                    RowLayout {
-                        spacing: 10
-                        Button {
-                            text: "+ " + qsTr("Add folder")
-                            Material.background: theme.accent
-                            Material.foreground: theme.accentForeground
-                            Material.roundedScale: theme.radius
-                            onClicked: backend.pickWatchFolder()
-                        }
-                        Button {
-                            text: qsTr("Scan now")
-                            Material.roundedScale: theme.radius
-                            enabled: !win.busy && settings.watchFolders.length > 0
-                            onClicked: {
-                                win.settingsVisible = false
-                                backend.scanFolders(settings.watchFolders)
+                            RowLayout {
+                                spacing: 10
+                                Button {
+                                    text: "+ " + qsTr("Add folder")
+                                    Material.background: theme.accent
+                                    Material.foreground: theme.accentForeground
+                                    Material.roundedScale: theme.radius
+                                    onClicked: backend.pickWatchFolder()
+                                }
+                                Button {
+                                    text: qsTr("Scan now")
+                                    Material.roundedScale: theme.radius
+                                    enabled: !win.busy && settings.watchFolders.length > 0
+                                    onClicked: {
+                                        win.settingsVisible = false
+                                        backend.scanFolders(settings.watchFolders)
+                                    }
+                                }
+                                Item { Layout.fillWidth: true }
                             }
-                        }
-                        Item { Layout.fillWidth: true }
-                    }
 
-                    Label {
-                        text: qsTr("Excluded folders")
-                        font.bold: true
-                    }
-                    Label {
-                        Layout.fillWidth: true
-                        text: qsTr("Folders inside these are never watched or scanned.")
-                        color: "#9a9aa2"
-                        font.pixelSize: 12
-                        wrapMode: Label.Wrap
-                    }
-
-                    ListView {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: Math.min(contentHeight, 100)
-                        clip: true
-                        spacing: 4
-                        model: settings.excludedFolders
-                        delegate: RowLayout {
-                            required property var modelData
-                            width: ListView.view.width
-                            spacing: 8
+                            Label {
+                                text: qsTr("Excluded folders")
+                                font.bold: true
+                            }
                             Label {
                                 Layout.fillWidth: true
-                                text: modelData
-                                elide: Label.ElideMiddle
-                                color: "#d8d8de"
-                            }
-                            Label {
-                                text: "✕"
+                                text: qsTr("Folders inside these are never watched or scanned.")
+                                color: "#9a9aa2"
                                 font.pixelSize: 12
-                                color: excludeRemoveMouse.containsMouse ? "#d08080" : "#9a9aa2"
-                                MouseArea {
-                                    id: excludeRemoveMouse
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: settings.removeExcludedFolder(modelData)
+                                wrapMode: Label.Wrap
+                            }
+
+                            ListView {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: Math.min(contentHeight, 100)
+                                clip: true
+                                spacing: 4
+                                model: settings.excludedFolders
+                                delegate: RowLayout {
+                                    required property var modelData
+                                    width: ListView.view.width
+                                    spacing: 8
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: modelData
+                                        elide: Label.ElideMiddle
+                                        color: "#d8d8de"
+                                    }
+                                    Label {
+                                        text: "✕"
+                                        font.pixelSize: 12
+                                        color: excludeRemoveMouse.containsMouse ? "#d08080" : "#9a9aa2"
+                                        MouseArea {
+                                            id: excludeRemoveMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: settings.removeExcludedFolder(modelData)
+                                        }
+                                    }
                                 }
                             }
-                        }
-                    }
 
-                    Button {
-                        text: "+ " + qsTr("Exclude folder")
-                        Material.roundedScale: theme.radius
-                        onClicked: backend.pickExcludeFolder()
-                    }
-
-                    Rectangle { Layout.fillWidth: true; height: 1; color: "#2c2c34" }
-
-                    GridLayout {
-                        Layout.fillWidth: true
-                        columns: 2
-                        columnSpacing: 16
-                        rowSpacing: 8
-
-                        Label { text: qsTr("Audio language") }
-                        ComboBox {
-                            Layout.fillWidth: true
-                            model: settings.languageModel
-                            textRole: "name"
-                            valueRole: "code"
-                            currentIndex: {
-                                for (let i = 0; i < settings.languageModel.length; ++i)
-                                    if (settings.languageModel[i].code === settings.audioLanguage)
-                                        return i
-                                return 0
+                            Button {
+                                text: "+ " + qsTr("Exclude folder")
+                                Material.roundedScale: theme.radius
+                                onClicked: backend.pickExcludeFolder()
                             }
-                            onActivated: settings.setAudioLanguage(currentValue)
-                        }
 
-                        Label { text: qsTr("Subtitle language") }
-                        ComboBox {
-                            Layout.fillWidth: true
-                            model: settings.languageModel
-                            textRole: "name"
-                            valueRole: "code"
-                            currentIndex: {
-                                for (let i = 0; i < settings.languageModel.length; ++i)
-                                    if (settings.languageModel[i].code === settings.subtitleLanguage)
-                                        return i
-                                return 0
+                            Rectangle { Layout.fillWidth: true; height: 1; color: "#2c2c34" }
+
+                            GridLayout {
+                                Layout.fillWidth: true
+                                columns: 2
+                                columnSpacing: 16
+                                rowSpacing: 8
+
+                                Label { text: qsTr("Audio language") }
+                                ComboBox {
+                                    Layout.fillWidth: true
+                                    model: settings.languageModel
+                                    textRole: "name"
+                                    valueRole: "code"
+                                    currentIndex: {
+                                        for (let i = 0; i < settings.languageModel.length; ++i)
+                                            if (settings.languageModel[i].code === settings.audioLanguage)
+                                                return i
+                                        return 0
+                                    }
+                                    onActivated: settings.setAudioLanguage(currentValue)
+                                }
+
+                                Label { text: qsTr("Subtitle language") }
+                                ComboBox {
+                                    Layout.fillWidth: true
+                                    model: settings.languageModel
+                                    textRole: "name"
+                                    valueRole: "code"
+                                    currentIndex: {
+                                        for (let i = 0; i < settings.languageModel.length; ++i)
+                                            if (settings.languageModel[i].code === settings.subtitleLanguage)
+                                                return i
+                                        return 0
+                                    }
+                                    onActivated: settings.setSubtitleLanguage(currentValue)
+                                }
                             }
-                            onActivated: settings.setSubtitleLanguage(currentValue)
-                        }
-                    }
 
-                    Rectangle { Layout.fillWidth: true; height: 1; color: "#2c2c34" }
+                            Rectangle { Layout.fillWidth: true; height: 1; color: "#2c2c34" }
 
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 10
-                        Label {
-                            text: qsTr("Watch service")
-                            font.bold: true
-                        }
-                        Label {
-                            text: backend.watchServiceActive ? qsTr("running") : qsTr("stopped")
-                            color: backend.watchServiceActive ? theme.accent : "#9a9aa2"
-                        }
-                        Item { Layout.fillWidth: true }
-                        Button {
-                            text: backend.watchServiceActive ? qsTr("Disable") : qsTr("Enable")
-                            Material.roundedScale: theme.radius
-                            onClicked: backend.setWatchServiceEnabled(!backend.watchServiceActive)
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 10
+                                Label {
+                                    text: qsTr("Watch service")
+                                    font.bold: true
+                                }
+                                Label {
+                                    text: backend.watchServiceActive ? qsTr("running") : qsTr("stopped")
+                                    color: backend.watchServiceActive ? theme.accent : "#9a9aa2"
+                                }
+                                Item { Layout.fillWidth: true }
+                                Button {
+                                    text: backend.watchServiceActive ? qsTr("Disable") : qsTr("Enable")
+                                    Material.roundedScale: theme.radius
+                                    onClicked: backend.setWatchServiceEnabled(!backend.watchServiceActive)
+                                }
+                            }
                         }
                     }
                 }
