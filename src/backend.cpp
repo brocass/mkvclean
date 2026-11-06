@@ -491,12 +491,15 @@ void Backend::startRemux() {
     // Drop temps left behind by an interrupted earlier run of this file.
     // Only touch ones that have been idle for an hour, so a live temp from
     // another mkvclean process working the same file is never deleted.
+    // Match by hand rather than with a QDir glob: release names contain
+    // "[…]" and "(…)", which QDir's wildcard-to-regex conversion mangles.
     const QFileInfo sourceInfo(m_sourcePath);
     const QDir sourceDir(sourceInfo.absolutePath());
-    const auto staleTemps = sourceDir.entryList(
-        {sourceInfo.fileName() + QStringLiteral(".mkvclean-*.tmp")}, QDir::Files);
+    const QString tempPrefix = sourceInfo.fileName() + QStringLiteral(".mkvclean-");
     const auto now = QDateTime::currentDateTime();
-    for (const auto &name : staleTemps) {
+    for (const auto &name : sourceDir.entryList(QDir::Files)) {
+        if (!name.startsWith(tempPrefix) || !name.endsWith(QStringLiteral(".tmp")))
+            continue;
         const QFileInfo stale(sourceDir.filePath(name));
         if (stale.lastModified().secsTo(now) > 3600)
             QFile::remove(stale.absoluteFilePath());

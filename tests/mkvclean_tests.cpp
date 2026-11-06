@@ -568,8 +568,22 @@ private slots:
             QSKIP("needs ffmpeg and MKVToolNix");
 
         QTemporaryDir dir;
-        const QString sample = makeSampleMkv(dir.path(), ffmpeg, mkvmerge);
+        // A real release name: brackets and parentheses must not trip the
+        // temp-cleanup matcher.
+        const QString sample = makeSampleMkv(
+            dir.path(), ffmpeg, mkvmerge,
+            "Movie (2026) [WEBRip-1080p] [x265] [NeoNoir].mkv");
         QVERIFY2(!sample.isEmpty(), "could not build the sample MKV");
+
+        // A temp left by an interrupted run; it must be swept when this clean
+        // starts (it is already older than the one-hour idle threshold).
+        const QString staleTemp = sample + ".mkvclean-999999.tmp";
+        write(staleTemp, "stale partial");
+        QFile staleFile(staleTemp);
+        QVERIFY(staleFile.open(QIODevice::ReadWrite));
+        QVERIFY(staleFile.setFileTime(QDateTime::currentDateTime().addSecs(-7200),
+                                      QFileDevice::FileModificationTime));
+        staleFile.close();
 
         // Wrap mkvmerge so the remux output name can be inspected. It must be
         // a private temp ending in ".tmp", never "*.remux": the watcher's
@@ -606,11 +620,12 @@ private slots:
                      qPrintable("mkvmerge wrote directly to " + output));
             QVERIFY(output.endsWith(".tmp"));
         }
-        // The swap still lands in place and leaves no remux or temp behind.
+        // The swap still lands in place and leaves no remux or temp behind;
+        // the stale temp from the interrupted run was swept.
         QVERIFY(QFile::exists(sample));
         QVERIFY(!QFile::exists(sample + ".remux"));
-        const auto onlyTempEntry = QDir(dir.path()).entryList({"*.tmp"}, QDir::Files);
-        QVERIFY(onlyTempEntry.isEmpty());
+        QVERIFY(!QFile::exists(staleTemp));
+        QCOMPARE(QDir(dir.path()).entryList({"*.tmp"}, QDir::Files).size(), 0);
     }
 
     void watcherCompletesPendingSwaps()
