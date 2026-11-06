@@ -39,7 +39,16 @@ struct MkvPlan {
     int removedCount() const;
 };
 
-using MkvExtractJobs = QList<QPair<int, QString>>;  // track id, output path
+// One subtitle extraction. standardPath is set only for an SDH track that the
+// user asked to convert: mkvextract writes outputPath ("….sdh.en.srt"), then a
+// cleaned copy is written to standardPath ("….en.srt").
+struct MkvExtractJob {
+    int trackId = -1;
+    QString outputPath;
+    QString standardPath;
+};
+
+using MkvExtractJobs = QList<MkvExtractJob>;
 
 namespace Mkv {
 
@@ -67,9 +76,10 @@ QString subtitleExtension(const QString &codecId);
 
 // "<base>[.sdh|.forced][.N].<lang>.<ext>"; groupIndex counts within the
 // track's own class of extracted tracks, and <lang> is the media-server
-// suffix for languageCode ("eng" → ".en.", "dan" → ".da.").
+// suffix for languageCode ("eng" → ".en.", "dan" → ".da."). asStandard names
+// an SDH track as if it were plain, for a converted copy.
 QString subtitleFileName(const QString &inputPath, const MkvTrack &track, int groupIndex,
-                         const QString &languageCode = "eng");
+                         const QString &languageCode = "eng", bool asStandard = false);
 
 // The desired name, then "-2", "-3"… before the extension, until nothing is there.
 QString availablePath(const QString &desired);

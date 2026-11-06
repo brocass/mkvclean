@@ -13,6 +13,7 @@ class AppSettings : public QObject {
     Q_PROPERTY(QStringList excludedFolders READ excludedFolders NOTIFY changed)
     Q_PROPERTY(QString audioLanguage READ audioLanguage NOTIFY changed)
     Q_PROPERTY(QString subtitleLanguage READ subtitleLanguage NOTIFY changed)
+    Q_PROPERTY(bool convertSdh READ convertSdh NOTIFY changed)
     Q_PROPERTY(QVariantList languageModel READ languageModel CONSTANT)
 
 public:
@@ -26,6 +27,7 @@ public:
     QStringList excludedFolders() const { return m_excludedFolders; }
     QString audioLanguage() const { return m_audioLanguage; }
     QString subtitleLanguage() const { return m_subtitleLanguage; }
+    bool convertSdh() const { return m_convertSdh; }
     QVariantList languageModel() const;
 
     Q_INVOKABLE void addWatchFolder(const QString &folder);
@@ -34,6 +36,7 @@ public:
     Q_INVOKABLE void removeExcludedFolder(const QString &folder);
     void setAudioLanguage(const QString &code);
     void setSubtitleLanguage(const QString &code);
+    void setConvertSdh(bool enabled);
 
 signals:
     void changed();
@@ -48,4 +51,5 @@ private:
     QStringList m_excludedFolders;
     QString m_audioLanguage = "eng";
     QString m_subtitleLanguage = "eng";
+    bool m_convertSdh = false;
 };

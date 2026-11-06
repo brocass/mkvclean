@@ -115,6 +115,7 @@ private:
     int countStates(const char *state) const;
     void startExtraction();
     void startRemux();
+    bool convertSdhSubtitle(MkvExtractJob &job);
     void pumpScanPool();
     void probeFinished(QProcess *process);
     void finishScan();

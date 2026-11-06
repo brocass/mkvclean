@@ -89,5 +89,7 @@
     "one": "Limpar %n arquivo",
     "other": "Limpar %n arquivos"
   },
-  "Discard": "Descartar"
+  "Discard": "Descartar",
+  "Convert SDH subtitles to standard": "Converter legendas SDH em padrão",
+  "Removes sound descriptions like [DOOR CLOSES] or (sighs), and speaker labels. The SDH-only subtitle file is replaced.": "Remove descrições sonoras como [PORTA FECHA] ou (suspiro), e rótulos de falantes. O arquivo de legenda apenas SDH é substituído."
 }

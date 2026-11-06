@@ -89,5 +89,7 @@
     "one": "Nettoyer %n fichier",
     "other": "Nettoyer %n fichiers"
   },
-  "Discard": "Tout abandonner"
+  "Discard": "Tout abandonner",
+  "Convert SDH subtitles to standard": "Convertir les sous-titres SDH en standard",
+  "Removes sound descriptions like [DOOR CLOSES] or (sighs), and speaker labels. The SDH-only subtitle file is replaced.": "Supprime les descriptions sonores comme [PORTE SE FERME] ou (soupir), et les noms de locuteurs. Le fichier de sous-titres SDH est remplacé."
 }

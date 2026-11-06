@@ -7,10 +7,12 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QRegularExpression>
+#include <QSaveFile>
 #include <QStandardPaths>
 #include <QUrl>
 
 #include "filepicker.h"
+#include "sdh.h"
 #include "settings.h"
 
 Backend::Backend(FilePicker *picker, QObject *parent, const QString &mkvmerge, const QString &mkvextract,
@@ -469,13 +471,55 @@ void Backend::startExtraction() {
     int groupIndices[] = {0, 0, 0};
     for (const int id : m_plan.extractSubtitleIds) {
         const MkvTrack *track = m_plan.track(id);
-        const int groupIndex = groupIndices[static_cast<int>(Mkv::subtitleClass(*track))]++;
-        const QString target = Mkv::availablePath(
+        const MkvSubtitleClass subtitleClass = Mkv::subtitleClass(*track);
+        const int groupIndex = groupIndices[static_cast<int>(subtitleClass)]++;
+        MkvExtractJob job;
+        job.trackId = id;
+        job.outputPath = Mkv::availablePath(
             Mkv::subtitleFileName(m_sourcePath, *track, groupIndex, subtitleLanguage()));
-        m_extractJobs.append({id, target});
+        // SDH tracks can be turned into standard subtitles, but only plain
+        // SubRip can be cleaned; ASS and friends keep their SDH name.
+        if (m_settings && m_settings->convertSdh()
+            && subtitleClass == MkvSubtitleClass::Sdh
+            && Mkv::subtitleExtension(track->codecId).compare(QStringLiteral("srt"),
+                                                              Qt::CaseInsensitive) == 0) {
+            job.standardPath = Mkv::subtitleFileName(m_sourcePath, *track, groupIndex,
+                                                     subtitleLanguage(), true);
+        }
+        m_extractJobs.append(job);
     }
     setStage(Stage::Extracting);
     m_process.start(m_mkvextract, Mkv::extractArguments(m_sourcePath, m_extractJobs));
+}
+
+// Writes the cleaned standard copy and drops the SDH-only file. On any
+// failure the extracted SDH file is left exactly as it was.
+bool Backend::convertSdhSubtitle(MkvExtractJob &job) {
+    QFile sdhFile(job.outputPath);
+    if (!sdhFile.open(QIODevice::ReadOnly))
+        return false;
+    const QString source = QString::fromUtf8(sdhFile.readAll());
+    sdhFile.close();
+
+    const Sdh::CleanResult cleaned = Sdh::cleanSrt(source);
+    // Nothing that looks like SubRip: leave it alone. A cue with only sound
+    // descriptions is also kept, rather than writing an empty subtitle.
+    if (cleaned.cues == 0 || cleaned.kept == 0)
+        return false;
+
+    const QString target = Mkv::availablePath(job.standardPath);
+    QSaveFile out(target);
+    if (!out.open(QIODevice::WriteOnly))
+        return false;
+    const QByteArray bytes = cleaned.text.toUtf8();
+    if (out.write(bytes) != bytes.size() || !out.commit())
+        return false;
+
+    // The standard file is safely on disk before the only SDH copy goes.
+    // If the removal is refused, keeping both is harmless.
+    QFile::remove(job.outputPath);
+    job.outputPath = target;
+    return true;
 }
 
 void Backend::startRemux() {
@@ -638,8 +682,11 @@ void Backend::processFinished(int code, QProcess::ExitStatus status) {
             recordQueueError(tr("Extracting the subtitles failed."));
             return;
         }
-        for (const auto &job : m_extractJobs)
-            m_extractedFiles.append(job.second);
+        for (auto &job : m_extractJobs) {
+            if (!job.standardPath.isEmpty())
+                convertSdhSubtitle(job);
+            m_extractedFiles.append(job.outputPath);
+        }
         if (batch())
             m_queueExtracted[m_queueIndex] = m_extractedFiles;
         m_extractJobs.clear();

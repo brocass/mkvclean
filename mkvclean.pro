@@ -10,6 +10,7 @@ HEADERS += \
     src/filepicker.h \
     src/mkv.h \
     src/portalfilepicker.h \
+    src/sdh.h \
     src/settings.h \
     src/theme.h \
     src/translator.h \
@@ -21,6 +22,7 @@ SOURCES += \
     src/cli.cpp \
     src/mkv.cpp \
     src/portalfilepicker.cpp \
+    src/sdh.cpp \
     src/settings.cpp \
     src/theme.cpp \
     src/translator.cpp \

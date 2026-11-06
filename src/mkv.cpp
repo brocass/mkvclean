@@ -183,10 +183,10 @@ MkvSubtitleClass Mkv::subtitleClass(const MkvTrack &track) {
 // groupIndex counts within the track's class, so a file with a plain, an SDH,
 // and a forced track yields ".en.srt", ".sdh.en.srt", and ".forced.en.srt".
 QString Mkv::subtitleFileName(const QString &inputPath, const MkvTrack &track, int groupIndex,
-                              const QString &languageCode) {
+                              const QString &languageCode, bool asStandard) {
     const QFileInfo info(inputPath);
     QString name = info.absolutePath() + "/" + info.completeBaseName();
-    switch (subtitleClass(track)) {
+    switch (asStandard ? MkvSubtitleClass::Plain : subtitleClass(track)) {
     case MkvSubtitleClass::Forced: name += ".forced"; break;
     case MkvSubtitleClass::Sdh: name += ".sdh"; break;
     case MkvSubtitleClass::Plain: break;
@@ -272,7 +272,7 @@ void Mkv::sortNaturally(QStringList &paths) {
 QStringList Mkv::extractArguments(const QString &inputPath, const MkvExtractJobs &jobs) {
     QStringList arguments{"tracks", inputPath};
     for (const auto &job : jobs)
-        arguments.append(QString("%1:%2").arg(job.first).arg(job.second));
+        arguments.append(QString("%1:%2").arg(job.trackId).arg(job.outputPath));
     return arguments;
 }
 

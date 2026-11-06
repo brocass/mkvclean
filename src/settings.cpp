@@ -80,6 +80,13 @@ void AppSettings::setSubtitleLanguage(const QString &code) {
     save();
 }
 
+void AppSettings::setConvertSdh(bool enabled) {
+    if (enabled == m_convertSdh)
+        return;
+    m_convertSdh = enabled;
+    save();
+}
+
 void AppSettings::load(const QString &legacyPath) {
     QFile file(m_path);
     if (file.open(QIODevice::ReadOnly)) {
@@ -96,6 +103,7 @@ void AppSettings::load(const QString &legacyPath) {
         const QString subtitle = validCode(object.value("subtitleLanguage").toString());
         if (!subtitle.isEmpty())
             m_subtitleLanguage = subtitle;
+        m_convertSdh = object.value("convertSdh").toBool(false);
         return;
     }
 
@@ -123,6 +131,7 @@ bool AppSettings::save() {
         {"excludedFolders", QJsonArray::fromStringList(m_excludedFolders)},
         {"audioLanguage", m_audioLanguage},
         {"subtitleLanguage", m_subtitleLanguage},
+        {"convertSdh", m_convertSdh},
     };
     file.write(QJsonDocument(object).toJson(QJsonDocument::Compact));
     if (!file.commit())

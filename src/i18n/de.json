@@ -89,5 +89,7 @@
     "one": "%n Datei bereinigen",
     "other": "%n Dateien bereinigen"
   },
-  "Discard": "Verwerfen"
+  "Discard": "Verwerfen",
+  "Convert SDH subtitles to standard": "SDH-Untertitel in Standard umwandeln",
+  "Removes sound descriptions like [DOOR CLOSES] or (sighs), and speaker labels. The SDH-only subtitle file is replaced.": "Entfernt Geräuschebeschreibungen wie [TÜR SCHLIESSST] oder (seufzt) und Sprecherbezeichnungen. Die reine SDH-Untertiteldatei wird ersetzt."
 }

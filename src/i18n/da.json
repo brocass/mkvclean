@@ -89,5 +89,7 @@
     "one": "Rens %n fil",
     "other": "Rens %n filer"
   },
-  "Discard": "Kassér"
+  "Discard": "Kassér",
+  "Convert SDH subtitles to standard": "Konverter SDH-undertekster til standard",
+  "Removes sound descriptions like [DOOR CLOSES] or (sighs), and speaker labels. The SDH-only subtitle file is replaced.": "Fjerner lydbeskrivelser som [DØR LUKKES] eller (suk), og taleretiketter. Undertekstfilen med kun SDH erstattes."
 }

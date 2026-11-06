@@ -993,6 +993,21 @@ ApplicationWindow {
                                 }
                             }
 
+                            CheckBox {
+                                Layout.fillWidth: true
+                                text: qsTr("Convert SDH subtitles to standard")
+                                checked: settings.convertSdh
+                                onToggled: settings.setConvertSdh(checked)
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                Layout.leftMargin: 4
+                                text: qsTr("Removes sound descriptions like [DOOR CLOSES] or (sighs), and speaker labels. The SDH-only subtitle file is replaced.")
+                                color: "#9a9aa2"
+                                font.pixelSize: 12
+                                wrapMode: Label.Wrap
+                            }
+
                             Rectangle { Layout.fillWidth: true; height: 1; color: "#2c2c34" }
 
                             RowLayout {

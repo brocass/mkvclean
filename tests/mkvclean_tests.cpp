@@ -8,6 +8,7 @@
 
 #include "backend.h"
 #include "mkv.h"
+#include "sdh.h"
 #include "settings.h"
 #include "theme.h"
 #include "translator.h"
@@ -167,6 +168,62 @@ private slots:
                  QString("/movies/My Movie.2020.sdh.en.srt"));
         QCOMPARE(Mkv::subtitleFileName("/movies/My Movie.2020.mkv", sdhSecond, 1),
                  QString("/movies/My Movie.2020.sdh.2.en.srt"));
+        // A converted SDH track is named like a plain subtitle.
+        QCOMPARE(Mkv::subtitleFileName("/movies/My Movie.2020.mkv", sdh, 0, "eng", true),
+                 QString("/movies/My Movie.2020.en.srt"));
+        QCOMPARE(Mkv::subtitleFileName("/movies/My Movie.2020.mkv", sdhSecond, 1, "eng", true),
+                 QString("/movies/My Movie.2020.2.en.srt"));
+    }
+
+    void sdhRemovesHearingImpairedText()
+    {
+        const QString input =
+            "1\n00:00:01,000 --> 00:00:02,000\n[DOOR CLOSES]\n\n"
+            "2\n00:00:02,500 --> 00:00:04,000\nJOHN: Hello there.\n\n"
+            "3\n00:00:04,500 --> 00:00:06,000\n(whispering) I can't hear you.\n\n"
+            "4\n00:00:06,000 --> 00:00:07,000\n♪ Music playing ♪\n\n"
+            "5\n00:00:07,500 --> 00:00:10,000\n- MAN: [LAUGHS] Run!\n";
+        const auto result = Sdh::cleanSrt(input);
+        QCOMPARE(result.cues, 5);
+        QCOMPARE(result.kept, 4);
+        QVERIFY(!result.text.contains("DOOR CLOSES"));
+        QVERIFY(!result.text.contains("JOHN"));
+        QVERIFY(!result.text.contains("whispering"));
+        QVERIFY(!result.text.contains("LAUGHS"));
+        QVERIFY(!result.text.contains("MAN:"));
+        QVERIFY(result.text.contains("Hello there."));
+        QVERIFY(result.text.contains("I can't hear you."));
+        QVERIFY(result.text.contains("Music playing"));
+        QVERIFY(result.text.contains("Run!"));
+        // Cues are renumbered without gaps; their timings are untouched.
+        QVERIFY(result.text.startsWith("1\n00:00:02,500 --> 00:00:04,000\n"));
+        QVERIFY(result.text.contains("\n\n2\n00:00:04,500"));
+        QVERIFY(result.text.contains("\n\n3\n00:00:06,000"));
+        QVERIFY(result.text.contains("\n\n4\n00:00:07,500"));
+    }
+
+    void sdhLeavesPlainDialogueAlone()
+    {
+        const QString input =
+            "1\n00:00:01,000 --> 00:00:02,000\nHe said: come in.\n\n"
+            "2\n00:00:02,500 --> 00:00:04,000\nI saw it yesterday.\n";
+        const auto result = Sdh::cleanSrt(input);
+        QCOMPARE(result.cues, 2);
+        QCOMPARE(result.kept, 2);
+        QCOMPARE(result.text, input);
+    }
+
+    void sdhKeepsTheLineEndingStyle()
+    {
+        const QString input =
+            QChar(0xFEFF)
+            + QString("1\r\n00:00:01,000 --> 00:00:02,000\r\n[DOOR CLOSES]\r\n\r\n"
+                      "2\r\n00:00:02,500 --> 00:00:04,000\r\nHello.\r\n");
+        const auto result = Sdh::cleanSrt(input);
+        QCOMPARE(result.kept, 1);
+        QVERIFY(result.text.startsWith(QChar(0xFEFF) + QString("1\r\n")));
+        QVERIFY(result.text.contains("Hello.\r\n"));
+        QVERIFY(!result.text.contains("\n\n"));
     }
 
     void availableNamesAvoidExistingFiles()
@@ -355,6 +412,70 @@ private slots:
         // Leftover track names are stripped along the way.
         QVERIFY(kept.at(0).name.isEmpty());
         QVERIFY(kept.at(1).name.isEmpty());
+    }
+
+    void backendConvertsSdhToStandardSubtitles()
+    {
+        const QString mkvmerge = QStandardPaths::findExecutable("mkvmerge");
+        const QString mkvextract = QStandardPaths::findExecutable("mkvextract");
+        const QString ffmpeg = QStandardPaths::findExecutable("ffmpeg");
+        if (mkvmerge.isEmpty() || mkvextract.isEmpty() || ffmpeg.isEmpty())
+            QSKIP("needs ffmpeg and MKVToolNix");
+
+        QTemporaryDir dir;
+        const QString sample = makeSdhMkv(dir.path(), ffmpeg, mkvmerge);
+        QVERIFY2(!sample.isEmpty(), "could not build the SDH sample MKV");
+
+        AppSettings settings(dir.filePath("config.json"), dir.filePath("no-legacy"));
+        settings.setConvertSdh(true);
+        Backend backend(nullptr, nullptr, mkvmerge, mkvextract);
+        backend.setSettings(&settings);
+        backend.openPath(sample);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("ready"), 15000);
+        backend.clean();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("done"), 30000);
+
+        QCOMPARE(backend.extractedFiles().size(), 1);
+        const QString srt = backend.extractedFiles().first();
+        QVERIFY2(srt.endsWith(".en.srt"), qPrintable(srt));
+        // The SDH-only copy is gone; the standard file has the dialogue only.
+        QVERIFY(!QFile::exists(dir.filePath("sdh.sdh.en.srt")));
+        QFile file(srt);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const QString contents = QString::fromUtf8(file.readAll());
+        QVERIFY(contents.contains("Hello from the SDH track"));
+        QVERIFY(!contents.contains("DOOR CLOSES"));
+    }
+
+    void backendKeepsSdhWhenConversionIsOff()
+    {
+        const QString mkvmerge = QStandardPaths::findExecutable("mkvmerge");
+        const QString mkvextract = QStandardPaths::findExecutable("mkvextract");
+        const QString ffmpeg = QStandardPaths::findExecutable("ffmpeg");
+        if (mkvmerge.isEmpty() || mkvextract.isEmpty() || ffmpeg.isEmpty())
+            QSKIP("needs ffmpeg and MKVToolNix");
+
+        QTemporaryDir dir;
+        const QString sample = makeSdhMkv(dir.path(), ffmpeg, mkvmerge, "kept.mkv");
+        QVERIFY2(!sample.isEmpty(), "could not build the SDH sample MKV");
+
+        AppSettings settings(dir.filePath("config.json"), dir.filePath("no-legacy"));
+        QVERIFY(!settings.convertSdh());
+        Backend backend(nullptr, nullptr, mkvmerge, mkvextract);
+        backend.setSettings(&settings);
+        backend.openPath(sample);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("ready"), 15000);
+        backend.clean();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("done"), 30000);
+
+        QCOMPARE(backend.extractedFiles().size(), 1);
+        const QString srt = backend.extractedFiles().first();
+        QVERIFY2(srt.endsWith(".sdh.en.srt"), qPrintable(srt));
+        QFile file(srt);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const QString contents = QString::fromUtf8(file.readAll());
+        QVERIFY(contents.contains("[DOOR CLOSES]"));
+        QVERIFY(contents.contains("Hello from the SDH track"));
     }
 
     void backendCleansABatch()
@@ -667,11 +788,15 @@ private slots:
         settings.setAudioLanguage("dan");
         settings.setSubtitleLanguage("ger");
         settings.setAudioLanguage("not-a-code");  // rejected, keeps the old value
+        settings.setConvertSdh(true);
 
         AppSettings reloaded(config, dir.filePath("no-legacy"));
         QCOMPARE(reloaded.watchFolders(), QStringList({dir.filePath("watched")}));
         QCOMPARE(reloaded.audioLanguage(), QString("dan"));
         QCOMPARE(reloaded.subtitleLanguage(), QString("ger"));
+        QVERIFY(reloaded.convertSdh());
+        reloaded.setConvertSdh(false);
+        QVERIFY(!reloaded.convertSdh());
 
         reloaded.removeWatchFolder(dir.filePath("watched"));
         QVERIFY(reloaded.watchFolders().isEmpty());
@@ -1033,6 +1158,32 @@ private:
             arguments << "--language" << "0:eng" << "--default-track-flag" << "0:yes"
                       << "--track-name" << "0:English stereo" << engWav;
         arguments << "--language" << "0:dan" << danWav << "--language" << "0:eng" << engSrt;
+        if (QProcess::execute(mkvmerge, arguments) != 0)
+            return {};
+        return sample;
+    }
+
+    // Video + English audio + one English subtitle track flagged as hearing
+    // impaired, carrying both a sound description and dialogue.
+    static QString makeSdhMkv(const QString &directory, const QString &ffmpeg,
+                              const QString &mkvmerge, const QString &name = "sdh.mkv")
+    {
+        QDir dir(directory);
+        const QString video = dir.filePath("video.mkv"), audio = dir.filePath("eng.wav"),
+                      srt = dir.filePath("sdh.srt"), sample = dir.filePath(name);
+        if (QProcess::execute(ffmpeg, {"-hide_banner", "-loglevel", "error", "-y",
+                                       "-f", "lavfi", "-i", "testsrc=duration=2:size=160x120:rate=10",
+                                       "-c:v", "libx264", "-pix_fmt", "yuv420p", video}) != 0)
+            return {};
+        if (QProcess::execute(ffmpeg, {"-hide_banner", "-loglevel", "error", "-y",
+                                       "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+                                       "-c:a", "pcm_s16le", audio}) != 0)
+            return {};
+        write(srt, "1\n00:00:00,000 --> 00:00:01,000\n[DOOR CLOSES]\n\n"
+                   "2\n00:00:01,200 --> 00:00:02,000\nHello from the SDH track\n");
+        const QStringList arguments{"-q", "-o", sample, video,
+                                    "--language", "0:eng", "--default-track-flag", "0:yes", audio,
+                                    "--language", "0:eng", "--hearing-impaired-flag", "0:yes", srt};
         if (QProcess::execute(mkvmerge, arguments) != 0)
             return {};
         return sample;
