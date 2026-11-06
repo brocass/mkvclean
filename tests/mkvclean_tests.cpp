@@ -788,7 +788,9 @@ private slots:
         settings.setAudioLanguage("dan");
         settings.setSubtitleLanguage("ger");
         settings.setAudioLanguage("not-a-code");  // rejected, keeps the old value
-        settings.setConvertSdh(true);
+        // The settings panel calls these from QML, which needs Q_INVOKABLE.
+        QVERIFY(QMetaObject::invokeMethod(&settings, "setConvertSdh", Q_ARG(bool, true)));
+        QVERIFY(settings.convertSdh());
 
         AppSettings reloaded(config, dir.filePath("no-legacy"));
         QCOMPARE(reloaded.watchFolders(), QStringList({dir.filePath("watched")}));
@@ -809,6 +811,23 @@ private slots:
         QCOMPARE(reloadedAgain.excludedFolders(), QStringList({dir.filePath("watched")}));
         reloadedAgain.removeExcludedFolder(dir.filePath("watched"));
         QVERIFY(reloadedAgain.excludedFolders().isEmpty());
+    }
+
+    void settingsFollowExternalChanges()
+    {
+        QTemporaryDir dir;
+        const QString config = dir.filePath("config.json");
+        // The window and the watch service are separate processes in real use;
+        // this stands in for both sides of the shared file.
+        AppSettings window(config, dir.filePath("no-legacy"));
+        AppSettings service(config, dir.filePath("no-legacy"));
+        QVERIFY(!service.convertSdh());
+
+        window.setConvertSdh(true);
+        QTRY_VERIFY_WITH_TIMEOUT(service.convertSdh(), 5000);
+
+        window.setAudioLanguage("dan");
+        QTRY_COMPARE_WITH_TIMEOUT(service.audioLanguage(), QString("dan"), 5000);
     }
 
     void withoutExcludedDropsNestedPaths()

@@ -4,6 +4,8 @@
 #include <QStringList>
 #include <QVariantList>
 
+class QFileSystemWatcher;
+
 // User preferences in ~/.config/mkvclean/config.json: the watched folders and
 // the preferred audio/subtitle languages (ISO 639-2). Saved atomically on
 // every change; the legacy watch-folders file is imported on first load.
@@ -34,15 +36,19 @@ public:
     Q_INVOKABLE void removeWatchFolder(const QString &folder);
     Q_INVOKABLE void addExcludedFolder(const QString &folder);
     Q_INVOKABLE void removeExcludedFolder(const QString &folder);
-    void setAudioLanguage(const QString &code);
-    void setSubtitleLanguage(const QString &code);
-    void setConvertSdh(bool enabled);
+    Q_INVOKABLE void setAudioLanguage(const QString &code);
+    Q_INVOKABLE void setSubtitleLanguage(const QString &code);
+    Q_INVOKABLE void setConvertSdh(bool enabled);
 
 signals:
     void changed();
 
 private:
     void load(const QString &legacyPath);
+    bool readConfig(QStringList *watchFolders, QStringList *excludedFolders,
+                    QString *audioLanguage, QString *subtitleLanguage, bool *convertSdh);
+    void watchConfigDirectory();
+    void reload();
     bool save();
     static QString validCode(const QString &code);
 
@@ -52,4 +58,5 @@ private:
     QString m_audioLanguage = "eng";
     QString m_subtitleLanguage = "eng";
     bool m_convertSdh = false;
+    QFileSystemWatcher *m_configWatcher = nullptr;
 };
