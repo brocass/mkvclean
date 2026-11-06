@@ -1,6 +1,8 @@
 #include "backend.h"
 
+#include <QCoreApplication>
 #include <QDesktopServices>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
@@ -288,6 +290,7 @@ void Backend::inspect(const QString &path) {
     m_extractedFiles.clear();
     m_outputPath.clear();
     m_partialPath.clear();
+    m_remuxTempPath.clear();
     m_progress = 0;
     emit progressChanged();
     setStage(Stage::Inspecting);
@@ -473,15 +476,34 @@ void Backend::startExtraction() {
 }
 
 void Backend::startRemux() {
-    // The cleaned file replaces the original in place. mkvmerge writes
-    // straight to its destination, so the remux goes to a ".remux" name
-    // first: a failed or cancelled run then leaves the original untouched,
-    // and a blocked swap keeps the verified remux for a later retry.
+    // The cleaned file replaces the original in place. mkvmerge writes to a
+    // private temporary name — never "*.remux" — so the watcher's sweep can
+    // only ever find a fully written file: naming the in-progress output
+    // ".remux" let a sweep swap a half-written file into place, after which
+    // the finishing job unlinked it and the remux was gone too (both files
+    // lost). Once mkvmerge exits cleanly the temp becomes the verified
+    // "<source>.remux" and is swapped in atomically; a failed or cancelled
+    // run only ever removes its own temp.
     m_outputPath = m_sourcePath;
-    m_partialPath = m_sourcePath + ".remux";
-    QFile::remove(m_partialPath);  // stale leftover from an earlier crash
+    m_partialPath = m_sourcePath + QStringLiteral(".remux");
+    m_remuxTempPath = m_sourcePath + QStringLiteral(".mkvclean-%1.tmp")
+                          .arg(QCoreApplication::applicationPid());
+    // Drop temps left behind by an interrupted earlier run of this file.
+    // Only touch ones that have been idle for an hour, so a live temp from
+    // another mkvclean process working the same file is never deleted.
+    const QFileInfo sourceInfo(m_sourcePath);
+    const QDir sourceDir(sourceInfo.absolutePath());
+    const auto staleTemps = sourceDir.entryList(
+        {sourceInfo.fileName() + QStringLiteral(".mkvclean-*.tmp")}, QDir::Files);
+    const auto now = QDateTime::currentDateTime();
+    for (const auto &name : staleTemps) {
+        const QFileInfo stale(sourceDir.filePath(name));
+        if (stale.lastModified().secsTo(now) > 3600)
+            QFile::remove(stale.absoluteFilePath());
+    }
+    QFile::remove(m_remuxTempPath);
     setStage(Stage::Remuxing);
-    m_process.start(m_mkvmerge, Mkv::remuxArguments(m_sourcePath, m_partialPath, m_plan));
+    m_process.start(m_mkvmerge, Mkv::remuxArguments(m_sourcePath, m_remuxTempPath, m_plan));
 }
 
 void Backend::cancel() {
@@ -521,6 +543,7 @@ void Backend::reset() {
     m_extractedFiles.clear();
     m_outputPath.clear();
     m_partialPath.clear();
+    m_remuxTempPath.clear();
     m_queuePaths.clear();
     m_queueStates.clear();
     m_queueErrors.clear();
@@ -562,7 +585,9 @@ void Backend::processFinished(int code, QProcess::ExitStatus status) {
 
     if (m_cancelling) {
         m_cancelling = false;
-        QFile::remove(m_partialPath);
+        // Only the private temp is ours to remove; a verified ".remux" from an
+        // earlier attempt is a good cleaned file and stays for a later pass.
+        QFile::remove(m_remuxTempPath);
         m_extractJobs.clear();
         if (batch()) {
             // The current file's original is untouched; the batch stops here.
@@ -616,17 +641,25 @@ void Backend::processFinished(int code, QProcess::ExitStatus status) {
         return;
     case Stage::Remuxing: {
         if (failed) {
-            QFile::remove(m_partialPath);
+            QFile::remove(m_remuxTempPath);
             recordQueueError(m_toolError.isEmpty() ? tr("Remuxing failed.") : m_toolError);
             return;
         }
-        // The remux verified good, so the original goes now. When something
-        // has the original busy (an Emby scan, a player, permissions), the
-        // ".remux" file stays behind; the watch service completes the swap on
-        // a later pass.
+        // mkvmerge finished writing the temp file, so it is a verified
+        // cleaned copy. Swap it straight into place with one atomic rename.
+        // If that is refused (permissions, a read-only mount), the original
+        // is untouched: keep the verified output alongside it as
+        // "<source>.remux" for a later pass instead of losing it.
         QString swapError;
-        if (!Mkv::replaceOriginal(m_sourcePath, m_partialPath, &swapError)) {
-            recordQueueError(tr("The original file is in use; the cleaned file was left as %1.").arg(m_partialPath));
+        if (!Mkv::replaceOriginal(m_sourcePath, m_remuxTempPath, &swapError)) {
+            QFile::remove(m_partialPath);
+            if (!QFile::rename(m_remuxTempPath, m_partialPath)) {
+                QFile::remove(m_remuxTempPath);
+                recordQueueError(tr("The cleaned file could not be prepared."));
+                return;
+            }
+            recordQueueError(tr("The cleaned file could not be moved into place; it was left as %1.")
+                                 .arg(m_partialPath));
             return;
         }
         m_queueStates[m_queueIndex] = "done";

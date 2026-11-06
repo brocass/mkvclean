@@ -130,7 +130,8 @@ private:
     QString m_errorText;
     QString m_toolError;       // "#GUI#error …" line from mkvmerge, when there is one
     QString m_outputPath;      // final destination — the original's own path
-    QString m_partialPath;     // m_outputPath + ".part" while remuxing
+    QString m_partialPath;     // m_outputPath + ".remux" (only once complete)
+    QString m_remuxTempPath;   // private in-progress file; never "*.remux"
     MkvExtractJobs m_extractJobs;
     QStringList m_extractedFiles;
     int m_progress = 0;

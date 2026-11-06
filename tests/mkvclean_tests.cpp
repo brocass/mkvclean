@@ -551,7 +551,66 @@ private slots:
         QVERIFY(!Mkv::replaceOriginal(original, remux));
         QVERIFY(QFile::exists(remux));
         QVERIFY(QFile::exists(original));
+        // A refused swap must not disturb the original's contents either.
+        QFile untouched(original);
+        QVERIFY(untouched.open(QIODevice::ReadOnly));
+        QCOMPARE(QString::fromUtf8(untouched.readAll()), QString("old2"));
+        untouched.close();
         QVERIFY(QFile::setPermissions(dir.path(), QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+    }
+
+    void remuxNeverWritesTheRemuxName()
+    {
+        const QString mkvmerge = QStandardPaths::findExecutable("mkvmerge");
+        const QString mkvextract = QStandardPaths::findExecutable("mkvextract");
+        const QString ffmpeg = QStandardPaths::findExecutable("ffmpeg");
+        if (mkvmerge.isEmpty() || mkvextract.isEmpty() || ffmpeg.isEmpty())
+            QSKIP("needs ffmpeg and MKVToolNix");
+
+        QTemporaryDir dir;
+        const QString sample = makeSampleMkv(dir.path(), ffmpeg, mkvmerge);
+        QVERIFY2(!sample.isEmpty(), "could not build the sample MKV");
+
+        // Wrap mkvmerge so the remux output name can be inspected. It must be
+        // a private temp ending in ".tmp", never "*.remux": the watcher's
+        // sweep retries every "*.remux", and if it caught a half-written one
+        // it would swap it in, after which the finishing job would unlink it
+        // and both files would be gone.
+        const QString marker = dir.filePath("outputs.log");
+        const QString wrapper = dir.filePath("mkvmerge-wrapper.sh");
+        write(wrapper, QString("#!/bin/sh\n"
+                               "if [ \"$1\" = \"-J\" ]; then exec '%1' \"$@\"; fi\n"
+                               "prev=\"\"\n"
+                               "for a in \"$@\"; do\n"
+                               "  if [ \"$prev\" = \"-o\" ]; then out=\"$a\"; fi\n"
+                               "  prev=\"$a\"\n"
+                               "done\n"
+                               "printf '%s\\n' \"$out\" >> '%2'\n"
+                               "exec '%1' \"$@\"\n")
+                           .arg(mkvmerge, marker).toUtf8());
+        QVERIFY(QFile::setPermissions(wrapper, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+
+        Backend backend(nullptr, nullptr, wrapper, mkvextract);
+        backend.openPath(sample);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("ready"), 15000);
+        backend.clean();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("done"), 30000);
+
+        QFile logFile(marker);
+        QVERIFY(logFile.open(QIODevice::ReadOnly));
+        const QStringList outputs =
+            QString::fromUtf8(logFile.readAll()).split('\n', Qt::SkipEmptyParts);
+        QVERIFY(!outputs.isEmpty());
+        for (const auto &output : outputs) {
+            QVERIFY2(!output.endsWith(".remux"),
+                     qPrintable("mkvmerge wrote directly to " + output));
+            QVERIFY(output.endsWith(".tmp"));
+        }
+        // The swap still lands in place and leaves no remux or temp behind.
+        QVERIFY(QFile::exists(sample));
+        QVERIFY(!QFile::exists(sample + ".remux"));
+        const auto onlyTempEntry = QDir(dir.path()).entryList({"*.tmp"}, QDir::Files);
+        QVERIFY(onlyTempEntry.isEmpty());
     }
 
     void watcherCompletesPendingSwaps()

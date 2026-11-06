@@ -7,6 +7,9 @@
 #include <QJsonObject>
 #include <QRegularExpression>
 
+#include <filesystem>
+#include <system_error>
+
 const MkvTrack *MkvPlan::track(int id) const {
     for (const auto &candidate : tracks)
         if (candidate.id == id)
@@ -224,18 +227,19 @@ QStringList Mkv::withoutExcluded(const QStringList &paths, const QStringList &ex
 }
 
 bool Mkv::replaceOriginal(const QString &originalPath, const QString &remuxPath, QString *error) {
-    // Swap the verified remux into place; the original only leaves its spot
-    // once the swap is underway, and when anything blocks it (original in
-    // use, permissions, ...) the original stays intact and the remux is left
-    // behind as "<original>.remux" for a later pass to complete the swap.
-    if (QFileInfo::exists(originalPath) && !QFile::remove(originalPath)) {
+    // Atomic swap: POSIX rename(2) puts the remux in the original's place in
+    // one step. It is never a remove followed by a rename, so the original
+    // cannot be unlinked while the replacement is missing. Renaming over an
+    // open file is fine on Linux (the open handle keeps the old inode alive).
+    // If the rename is refused (permissions, read-only mount, ...) both files
+    // are left exactly as they were: the original intact and the verified
+    // remux alongside it as "<original>.remux" for a later pass.
+    std::error_code ec;
+    std::filesystem::rename(std::filesystem::path(remuxPath.toStdString()),
+                            std::filesystem::path(originalPath.toStdString()), ec);
+    if (ec) {
         if (error)
-            *error = "the original could not be removed";
-        return false;
-    }
-    if (!QFile::rename(remuxPath, originalPath)) {
-        if (error)
-            *error = "the original file is in use";
+            *error = QString::fromStdString(ec.message());
         return false;
     }
     return true;
