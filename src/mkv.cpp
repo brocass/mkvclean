@@ -224,14 +224,18 @@ QStringList Mkv::withoutExcluded(const QStringList &paths, const QStringList &ex
 }
 
 bool Mkv::replaceOriginal(const QString &originalPath, const QString &remuxPath, QString *error) {
-    if (QFileInfo::exists(originalPath) && !QFile::moveToTrash(originalPath) && !QFile::remove(originalPath)) {
+    // Swap the verified remux into place; the original only leaves its spot
+    // once the swap is underway, and when anything blocks it (original in
+    // use, permissions, ...) the original stays intact and the remux is left
+    // behind as "<original>.remux" for a later pass to complete the swap.
+    if (QFileInfo::exists(originalPath) && !QFile::remove(originalPath)) {
         if (error)
             *error = "the original could not be removed";
         return false;
     }
     if (!QFile::rename(remuxPath, originalPath)) {
         if (error)
-            *error = "the cleaned file could not be moved into place";
+            *error = "the original file is in use";
         return false;
     }
     return true;

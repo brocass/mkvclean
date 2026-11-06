@@ -87,10 +87,10 @@ void sortNaturally(QStringList &paths);
 // still process whatever they are pointed at.
 QStringList withoutExcluded(const QStringList &paths, const QStringList &excludedFolders);
 
-// Swap a verified remux into place: the original goes to the trash when the
-// desktop offers one, deleted otherwise. False when anything blocked the
-// swap (the original in use, permissions); the remux file is then left
-// untouched so a later pass can complete the swap.
+// Swap a verified remux into place: rename the remux over the original
+// atomically; the original is left untouched when the swap is refused (the
+// original in use, permissions); the remux file is then left untouched so a
+// later pass can complete the swap.
 bool replaceOriginal(const QString &originalPath, const QString &remuxPath, QString *error = nullptr);
 
 QStringList extractArguments(const QString &inputPath, const MkvExtractJobs &jobs);
