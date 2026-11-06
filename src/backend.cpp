@@ -82,7 +82,10 @@ bool Backend::toolsAvailable() const {
 }
 
 bool Backend::busy() const {
-    return m_stage == Stage::Inspecting || m_stage == Stage::Extracting || m_stage == Stage::Remuxing;
+    // A scan leaves the stage at Idle but is very much work in progress:
+    // treat it as busy so it cannot be reset, restarted, or opened over.
+    return m_scanning || m_stage == Stage::Inspecting || m_stage == Stage::Extracting
+           || m_stage == Stage::Remuxing;
 }
 
 QString Backend::state() const {

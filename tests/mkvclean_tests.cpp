@@ -862,6 +862,31 @@ private slots:
         QVERIFY(!backend.scanning());
     }
 
+    void backendScanIsBusyUntilItEnds()
+    {
+        QTemporaryDir dir;
+        write(dir.filePath("a.mkv"), "");
+        write(dir.filePath("b.mkv"), "");
+        Backend backend(nullptr, nullptr, makeSleepTool(dir.path()), "/bin/true", 30000);
+        backend.scanFolders({dir.path()});
+        QVERIFY(backend.scanning());
+        QCOMPARE(backend.scanTotal(), 2);
+
+        // A running scan counts as busy: reset must not tear it down, and a
+        // second scan must not stack another probe pool over the first.
+        backend.reset();
+        QVERIFY(backend.scanning());
+        QCOMPARE(backend.scanTotal(), 2);
+        backend.scanFolders({dir.path()});
+        QVERIFY(backend.scanning());
+        QCOMPARE(backend.scanTotal(), 2);
+
+        // Cancel is still the way out.
+        backend.cancel();
+        QTRY_COMPARE(backend.state(), QString("idle"));
+        QVERIFY(!backend.scanning());
+    }
+
     void backendScanReviewTrimsTheList()
     {
         const QString mkvmerge = QStandardPaths::findExecutable("mkvmerge");

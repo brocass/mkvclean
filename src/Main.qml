@@ -20,7 +20,21 @@ ApplicationWindow {
     property bool helpVisible: false
     property bool settingsVisible: false
     property bool quitConfirmVisible: false
-    readonly property bool busy: backend.state === "inspecting" || backend.state === "extracting" || backend.state === "remuxing"
+    // A library scan reports state "idle" (the scan has its own progress
+    // properties), so include it explicitly. Without it, Q quits instantly
+    // with no confirmation, Escape cannot cancel the scan, the window close
+    // button exits mid-scan, and "Scan now" can start a second scan over the
+    // first.
+    readonly property bool busy: backend.scanning || backend.state === "inspecting"
+                                  || backend.state === "extracting" || backend.state === "remuxing"
+
+    // Closing the window is a quit like any other: ask first while busy.
+    onClosing: function(close) {
+        if (win.busy) {
+            close.accepted = false
+            win.quitConfirmVisible = true
+        }
+    }
     readonly property string viewName: {
         if (backend.scanning)
             return "working"
