@@ -1,12 +1,13 @@
 ---
 name: mkvclean
-description: Extract English subtitles from MKV files and remux them down to the video plus the default English audio track, replacing the originals. Use when asked to strip subtitles or extra audio tracks from MKV files or whole folders, extract .srt subtitles from videos, or keep only the English audio. Requires MKVToolNix (mkvmerge, mkvextract).
+description: Extract English subtitles from MKV files and remux them down to the video plus the default English audio track, replacing the originals. Optionally remove black bars with a HandBrake-style x265 re-encode. Use when asked to strip subtitles or extra audio tracks from MKV files or whole folders, extract .srt subtitles from videos, keep only the English audio, or crop letterboxing. Requires MKVToolNix (mkvmerge, mkvextract); black-bar removal also needs ffmpeg.
 ---
 
 # mkvclean
 
-`mkvclean clean <file-or-folder>… [--json]` does the whole job headless, for
-one file or many (folders are scanned recursively for `*.mkv`):
+`mkvclean clean <file-or-folder>… [--json] [--remove-bars|--no-remove-bars]`
+does the whole job headless, for one file or many (folders are scanned
+recursively for `*.mkv`):
 
 1. Extracts English subtitle tracks next to the original, tagged by kind:
    `<name>.en.srt` (plain) and `<name>.forced.en.srt` (forced) always;
@@ -22,6 +23,12 @@ one file or many (folders are scanned recursively for `*.mkv`):
    trash when one is available (recoverable from there). If the original is
    busy, the verified remux is left as `<name>.mkv.remux` and the watch
    service completes the swap on a later pass.
+3. Optionally removes black bars (`--remove-bars`, or the saved setting):
+   ffmpeg detects the letterboxed area and re-encodes the video with the
+   HandBrake "1080p x265 Slow and Low" preset (10-bit HEVC, slow, CRF 21.5,
+   variable frame rate, audio copied, chapters kept), then swaps the cropped
+   file in. A file with bars but no other work is still cleaned when this is
+   on; `--no-remove-bars` forces the plain remux.
 
 A corrupt or unreadable file is reported as an error and left untouched; one
 bad file never stops the batch.
@@ -31,16 +38,17 @@ bad file never stops the batch.
 Single file — one JSON object (short text lines without `--json`):
 
 ```json
-{"input":"…","output":"… (same path as input)","subtitles":["…"],"kept_audio":{"id":1,"language":"eng","codec":"AAC"},"removed":{"tracks":4}}
+{"input":"…","output":"… (same path as input)","subtitles":["…"],"kept_audio":{"id":1,"language":"eng","codec":"AAC"},"removed":{"tracks":4},"cropped":false}
 ```
 
-`kept_audio` is `null` when the file had no audio track at all.
+`kept_audio` is `null` when the file had no audio track at all; `cropped`
+says whether the video was re-encoded to remove black bars.
 
 Multiple files — one JSON object per line (JSONL), each carrying
 `"status": "ok"` or `"status": "error"` plus an `"error"` message:
 
 ```json
-{"input":"…","status":"ok","output":"…","subtitles":["…"],"kept_audio":{"id":1}}
+{"input":"…","status":"ok","output":"…","subtitles":["…"],"kept_audio":{"id":1},"cropped":false}
 {"input":"…","status":"error","error":"No English audio track in this file."}
 ```
 

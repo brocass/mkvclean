@@ -17,6 +17,36 @@ struct MkvTrack {
     bool isDefault = false;
     bool isForced = false;
     bool isHearingImpaired = false;
+    // Video tracks only; 0 when the container doesn't say.
+    int width = 0;
+    int height = 0;
+};
+
+// The non-black part of a frame, as ffmpeg's cropdetect reports it: the
+// content size and the offset of the bars trimmed from the left and top.
+struct MkvCrop {
+    int width = 0;
+    int height = 0;
+    int x = 0;
+    int y = 0;
+    int sourceWidth = 0;
+    int sourceHeight = 0;
+
+    bool isValid() const { return width > 0 && height > 0; }
+    // A valid crop that actually removes something; a full-frame answer is a
+    // video without bars. A couple of pixels is edge noise from cropdetect
+    // (a plain 160x120 test pattern reports 158x120), not letterboxing, so
+    // require at least four pixels trimmed in one dimension.
+    bool hasBars() const
+    {
+        return isValid() && sourceWidth > 0 && sourceHeight > 0
+               && (sourceWidth - width >= 4 || sourceHeight - height >= 4);
+    }
+    // "1920:800:0:140", the ffmpeg crop filter payload.
+    QString filter() const
+    {
+        return QString("%1:%2:%3:%4").arg(width).arg(height).arg(x).arg(y);
+    }
 };
 
 // How an extracted subtitle file is tagged: plain (".en"), SDH (".sdh.en"),
@@ -105,5 +135,24 @@ bool replaceOriginal(const QString &originalPath, const QString &remuxPath, QStr
 
 QStringList extractArguments(const QString &inputPath, const MkvExtractJobs &jobs);
 QStringList remuxArguments(const QString &inputPath, const QString &outputPath, const MkvPlan &plan);
+
+// Container duration in milliseconds from `mkvmerge -J`, 0 when unknown.
+qint64 durationMs(const QJsonDocument &identification);
+
+// A fast black-bar probe: decodes only keyframes, skipping the first and last
+// few percent (fades are black), so even a large library is quick to scan.
+QStringList cropDetectArguments(const QString &inputPath, qint64 durationMs);
+
+// The most common cropdetect rectangle in the output, ignoring a full-frame
+// answer and implausibly small ones (a black scene, not letterboxing). Needs
+// the source dimensions to know what "full frame" means.
+MkvCrop parseCrop(const QString &output, int sourceWidth, int sourceHeight);
+
+// The HandBrake "1080p x265 Slow and Low" equivalent: crop to the detected
+// rectangle, deinterlace only interlaced frames, shrink to fit 1920x1080
+// without ever upscaling, libx265 10-bit slow CRF 21.5 with the preset's
+// advanced options, audio copied, chapters and metadata kept.
+QStringList encodeArguments(const QString &inputPath, const QString &outputPath,
+                            const MkvPlan &plan, const MkvCrop &crop);
 
 }

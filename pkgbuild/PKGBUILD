@@ -1,10 +1,10 @@
 pkgname=mkvclean
-pkgver=0.5.16
+pkgver=0.6.0
 pkgrel=1
-pkgdesc='Extract English subtitles from MKV files and keep only the default English audio'
+pkgdesc='Extract English subtitles from MKV files, keep only the default English audio, and optionally remove black bars'
 arch=('x86_64' 'aarch64')
 license=('MIT')
-depends=('qt6-base' 'qt6-declarative' 'qt6-wayland' 'xdg-desktop-portal' 'mkvtoolnix-cli')
+depends=('qt6-base' 'qt6-declarative' 'qt6-wayland' 'xdg-desktop-portal' 'mkvtoolnix-cli' 'ffmpeg')
 makedepends=('gcc' 'make')
 source=()
 sha256sums=()

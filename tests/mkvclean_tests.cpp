@@ -36,6 +36,108 @@ private slots:
         QCOMPARE(tracks.at(2).codecId, QString("S_TEXT/UTF8"));
     }
 
+    void parsesVideoDimensionsAndDuration()
+    {
+        const auto json = QJsonDocument::fromJson(R"({
+            "container": {"properties": {"duration": 7200000000}},
+            "tracks": [
+                {"id": 0, "type": "video", "codec": "HEVC/H.265",
+                 "properties": {"pixel_dimensions": "1920x804"}},
+                {"id": 1, "type": "video", "codec": "HEVC/H.265",
+                 "properties": {"display_dimensions": "1280x720"}}
+            ]
+        })");
+        const auto tracks = Mkv::parseTracks(json);
+        QCOMPARE(tracks.at(0).width, 1920);
+        QCOMPARE(tracks.at(0).height, 804);
+        // Older/no pixel_dimensions: fall back to the display dimensions.
+        QCOMPARE(tracks.at(1).width, 1280);
+        QCOMPARE(tracks.at(1).height, 720);
+        // mkvmerge reports nanoseconds; the UI works in milliseconds.
+        QCOMPARE(Mkv::durationMs(json), qint64(7200));
+    }
+
+    void cropProbeIsFastAndAvoidsTheEnds()
+    {
+        const auto longFile = Mkv::cropDetectArguments("/movies/movie.mkv", 600000);
+        QCOMPARE(longFile.at(longFile.indexOf("-skip_frame") + 1), QString("nokey"));
+        QCOMPARE(longFile.at(longFile.indexOf("-ss") + 1), QString("30.000"));
+        QCOMPARE(longFile.at(longFile.indexOf("-t") + 1), QString("540.000"));
+        QVERIFY(longFile.contains("cropdetect=limit=24:round=2:reset=0:skip=0"));
+        QCOMPARE(longFile.last(), QString("-"));
+        QCOMPARE(longFile.at(longFile.size() - 2), QString("null"));
+
+        // A short clip is scanned whole: sampling its 5%–95% would leave
+        // almost nothing.
+        const auto shortFile = Mkv::cropDetectArguments("/movies/clip.mkv", 30000);
+        QVERIFY(!shortFile.contains("-ss"));
+        QVERIFY(!shortFile.contains("-t"));
+    }
+
+    void parsesTheMostCommonCrop()
+    {
+        const QString output =
+            "[Parsed_cropdetect_0 @ 0x1] x1:0 x2:1919 y1:140 y2:939 w:1920 h:800 x:0 y:140 "
+            "crop=1920:800:0:140\n"
+            "[Parsed_cropdetect_0 @ 0x1] crop=1920:800:0:140\n"
+            // A dark scene reports a much smaller rectangle; it must lose.
+            "[Parsed_cropdetect_0 @ 0x1] crop=640:360:0:0\n"
+            "[Parsed_cropdetect_0 @ 0x1] crop=1920:800:0:140\n";
+        const auto crop = Mkv::parseCrop(output, 1920, 1080);
+        QVERIFY(crop.isValid());
+        QVERIFY(crop.hasBars());
+        QCOMPARE(crop.width, 1920);
+        QCOMPARE(crop.height, 800);
+        QCOMPARE(crop.y, 140);
+        QCOMPARE(crop.filter(), QString("1920:800:0:140"));
+
+        // Full frame means no bars; a tiny rectangle is a black scene.
+        QVERIFY(!Mkv::parseCrop("crop=1920:1080:0:0", 1920, 1080).isValid());
+        QVERIFY(!Mkv::parseCrop("crop=320:180:0:0", 1920, 1080).isValid());
+        QVERIFY(!Mkv::parseCrop("nothing here", 1920, 1080).isValid());
+        // Edge rounding is not letterboxing: a plain 160x120 pattern probes
+        // as 158x120, which must not count as bars.
+        const auto edgeNoise = Mkv::parseCrop("crop=158:120:2:0", 160, 120);
+        QVERIFY(edgeNoise.isValid());
+        QVERIFY(!edgeNoise.hasBars());
+    }
+
+    void encodeMatchesTheHandBrakePreset()
+    {
+        MkvTrack video;
+        video.id = 0;
+        video.type = "video";
+        const auto plan = Mkv::makePlan({video, audio(1, "eng", true), audio(2, "dan", false)});
+        MkvCrop crop;
+        crop.width = 1920;
+        crop.height = 800;
+        crop.x = 0;
+        crop.y = 140;
+        crop.sourceWidth = 1920;
+        crop.sourceHeight = 1080;
+
+        const auto arguments = Mkv::encodeArguments("/in.mkv", "/out.tmp", plan, crop);
+        QCOMPARE(arguments.at(arguments.indexOf("-c:v") + 1), QString("libx265"));
+        QCOMPARE(arguments.at(arguments.indexOf("-preset") + 1), QString("slow"));
+        QCOMPARE(arguments.at(arguments.indexOf("-crf") + 1), QString("21.5"));
+        QCOMPARE(arguments.at(arguments.indexOf("-pix_fmt") + 1), QString("yuv420p10le"));
+        const QString params = arguments.at(arguments.indexOf("-x265-params") + 1);
+        QVERIFY(params.contains("strong-intra-smoothing=0"));
+        QVERIFY(params.contains("psy-rdoq=4.0"));
+        QVERIFY(params.contains("rskip=2"));
+        QCOMPARE(arguments.at(arguments.indexOf("-map") + 1), QString("0:v:0"));
+        QVERIFY(arguments.contains("0:a:0"));
+        QCOMPARE(arguments.at(arguments.indexOf("-vf") + 1),
+                 QString("crop=1920:800:0:140,"
+                         "yadif=deint=interlaced,"
+                         "scale=w='min(1920,iw)':h='min(1080,ih)':"
+                         "force_original_aspect_ratio=decrease:force_divisible_by=2"));
+        QCOMPARE(arguments.at(arguments.indexOf("-c:a") + 1), QString("copy"));
+        QVERIFY(arguments.contains("-map_chapters"));
+        QVERIFY(arguments.contains("-map_metadata"));
+        QCOMPARE(arguments.last(), QString("/out.tmp"));
+    }
+
     void planKeepsDefaultEnglishAudio()
     {
         const auto plan = Mkv::makePlan({
@@ -505,6 +607,89 @@ private slots:
         QVERIFY(QFile::exists(dir.filePath("b-second.en.srt")));
     }
 
+    void backendFindsAndRemovesBlackBars()
+    {
+        const QString mkvmerge = QStandardPaths::findExecutable("mkvmerge");
+        const QString mkvextract = QStandardPaths::findExecutable("mkvextract");
+        const QString ffmpeg = QStandardPaths::findExecutable("ffmpeg");
+        if (mkvmerge.isEmpty() || mkvextract.isEmpty() || ffmpeg.isEmpty())
+            QSKIP("needs ffmpeg and MKVToolNix");
+
+        QTemporaryDir dir;
+        const QString sample = makeLetterboxedMkv(dir.path(), ffmpeg, mkvmerge);
+        QVERIFY2(!sample.isEmpty(), "could not build the letterboxed sample");
+
+        // The file needs no track cleanup at all: only its bars make it worth
+        // touching, which is exactly the case a plain scan used to miss.
+        const auto before = Mkv::parseTracks(inspect(mkvmerge, sample));
+        QCOMPARE(before.size(), 2);
+        QCOMPARE(before.at(0).height, 240);
+
+        AppSettings settings(dir.filePath("config.json"), dir.filePath("no-legacy"));
+        QVERIFY(!settings.removeBars());
+        Backend backend(nullptr, nullptr, mkvmerge, mkvextract, 30000, ffmpeg);
+        backend.setSettings(&settings);
+        backend.setReviewAfterScan(true);
+        backend.scanFolders({dir.path()});
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("review"), 60000);
+
+        // It is in the review list with its bars found and the tick shown,
+        // unticked because the setting is off.
+        QCOMPARE(backend.queueCount(), 1);
+        QCOMPARE(backend.barsDetectedCount(), 1);
+        QCOMPARE(backend.barsSelectedCount(), 0);
+        const auto row = backend.queue().first().toMap();
+        QVERIFY(row.value("bars").toBool());
+        QCOMPARE(row.value("cropHeight").toInt(), 180);
+        QVERIFY(!row.value("needsWork").toBool());
+        QVERIFY(!row.value("removeBars").toBool());
+
+        backend.setQueueRemoveBars(0, true);
+        QCOMPARE(backend.barsSelectedCount(), 1);
+        backend.startBatch();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("done"), 180000);
+
+        QVERIFY(backend.cropped());
+        QCOMPARE(backend.queueCleanedCount(), 1);
+        const auto after = Mkv::parseTracks(inspect(mkvmerge, sample));
+        QCOMPARE(after.size(), 2);
+        QCOMPARE(after.at(0).type, QString("video"));
+        QCOMPARE(after.at(0).height, 180);
+        QCOMPARE(after.at(1).type, QString("audio"));
+        QVERIFY(!QFile::exists(sample + ".remux"));
+        QCOMPARE(QDir(dir.path()).entryList({"*.tmp"}, QDir::Files).size(), 0);
+    }
+
+    void backendScanDropsUntickedBarOnlyFiles()
+    {
+        const QString mkvmerge = QStandardPaths::findExecutable("mkvmerge");
+        const QString mkvextract = QStandardPaths::findExecutable("mkvextract");
+        const QString ffmpeg = QStandardPaths::findExecutable("ffmpeg");
+        if (mkvmerge.isEmpty() || mkvextract.isEmpty() || ffmpeg.isEmpty())
+            QSKIP("needs ffmpeg and MKVToolNix");
+
+        QTemporaryDir dir;
+        const QString sample = makeLetterboxedMkv(dir.path(), ffmpeg, mkvmerge);
+        QVERIFY2(!sample.isEmpty(), "could not build the letterboxed sample");
+        QFile file(sample);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const qint64 sizeBefore = file.size();
+        file.close();
+
+        Backend backend(nullptr, nullptr, mkvmerge, mkvextract, 30000, ffmpeg);
+        backend.setReviewAfterScan(true);
+        backend.scanFolders({dir.path()});
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("review"), 60000);
+        QCOMPARE(backend.queueCount(), 1);
+
+        // Nothing ticked and no other work: cleaning must not rewrite the
+        // file just because it was listed.
+        backend.startBatch();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("idle"), 15000);
+        QCOMPARE(backend.queueCount(), 0);
+        QCOMPARE(QFileInfo(sample).size(), sizeBefore);
+    }
+
     void backendBatchContinuesPastFailures()
     {
         const QString mkvmerge = QStandardPaths::findExecutable("mkvmerge");
@@ -791,14 +976,19 @@ private slots:
         // The settings panel calls these from QML, which needs Q_INVOKABLE.
         QVERIFY(QMetaObject::invokeMethod(&settings, "setConvertSdh", Q_ARG(bool, true)));
         QVERIFY(settings.convertSdh());
+        QVERIFY(QMetaObject::invokeMethod(&settings, "setRemoveBars", Q_ARG(bool, true)));
+        QVERIFY(settings.removeBars());
 
         AppSettings reloaded(config, dir.filePath("no-legacy"));
         QCOMPARE(reloaded.watchFolders(), QStringList({dir.filePath("watched")}));
         QCOMPARE(reloaded.audioLanguage(), QString("dan"));
         QCOMPARE(reloaded.subtitleLanguage(), QString("ger"));
         QVERIFY(reloaded.convertSdh());
+        QVERIFY(reloaded.removeBars());
         reloaded.setConvertSdh(false);
         QVERIFY(!reloaded.convertSdh());
+        reloaded.setRemoveBars(false);
+        QVERIFY(!reloaded.removeBars());
 
         reloaded.removeWatchFolder(dir.filePath("watched"));
         QVERIFY(reloaded.watchFolders().isEmpty());
@@ -822,9 +1012,13 @@ private slots:
         AppSettings window(config, dir.filePath("no-legacy"));
         AppSettings service(config, dir.filePath("no-legacy"));
         QVERIFY(!service.convertSdh());
+        QVERIFY(!service.removeBars());
 
         window.setConvertSdh(true);
         QTRY_VERIFY_WITH_TIMEOUT(service.convertSdh(), 5000);
+
+        window.setRemoveBars(true);
+        QTRY_VERIFY_WITH_TIMEOUT(service.removeBars(), 5000);
 
         window.setAudioLanguage("dan");
         QTRY_COMPARE_WITH_TIMEOUT(service.audioLanguage(), QString("dan"), 5000);
@@ -1178,6 +1372,32 @@ private:
                       << "--track-name" << "0:English stereo" << engWav;
         arguments << "--language" << "0:dan" << danWav << "--language" << "0:eng" << engSrt;
         if (QProcess::execute(mkvmerge, arguments) != 0)
+            return {};
+        return sample;
+    }
+
+    // 320x240 video that is really 320x180 with 30px black bars top and
+    // bottom, plus one default English audio track and nothing else. Only the
+    // bars make it worth cleaning.
+    static QString makeLetterboxedMkv(const QString &directory, const QString &ffmpeg,
+                                      const QString &mkvmerge, const QString &name = "bars.mkv")
+    {
+        QDir dir(directory);
+        const QString video = dir.filePath("letterboxed-source.mp4"),
+                      audio = dir.filePath("letterboxed.wav"), sample = dir.filePath(name);
+        if (QProcess::execute(ffmpeg, {"-hide_banner", "-loglevel", "error", "-y",
+                                       "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=10",
+                                       "-t", "2", "-vf", "pad=320:240:0:30:black",
+                                       "-c:v", "libx264", "-pix_fmt", "yuv420p", "-g", "10",
+                                       video}) != 0)
+            return {};
+        if (QProcess::execute(ffmpeg, {"-hide_banner", "-loglevel", "error", "-y",
+                                       "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+                                       "-c:a", "pcm_s16le", audio}) != 0)
+            return {};
+        if (QProcess::execute(mkvmerge, {"-q", "-o", sample, video,
+                                         "--language", "0:eng", "--default-track-flag", "0:yes",
+                                         audio}) != 0)
             return {};
         return sample;
     }

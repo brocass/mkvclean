@@ -33,10 +33,13 @@ int main(int argc, char *argv[]) {
             if (!arguments.at(i).startsWith("--"))
                 inputs.append(QFileInfo(arguments.at(i)).absoluteFilePath());
         if (inputs.isEmpty()) {
-            QTextStream(stderr) << "usage: mkvclean clean <file-or-folder>… [--json]\n";
+            QTextStream(stderr) << "usage: mkvclean clean <file-or-folder>… [--json]"
+                                   " [--remove-bars|--no-remove-bars]\n";
             return 1;
         }
-        return runClean(app, inputs, json);
+        const int cropOverride = arguments.contains("--no-remove-bars") ? 0
+                                 : arguments.contains("--remove-bars") ? 1 : -1;
+        return runClean(app, inputs, json, cropOverride);
     }
     if (arguments.size() >= 2 && arguments.at(1) == "watch") {
         QCoreApplication app(argc, argv);
@@ -51,7 +54,7 @@ int main(int argc, char *argv[]) {
 
     QGuiApplication app(argc, argv);
     app.setApplicationName("mkvclean");
-    app.setApplicationVersion("0.5.16");
+    app.setApplicationVersion("0.6.0");
 
     // Matches the window to mkvclean.desktop, so the compositor (Wayland
     // app_id) and the launcher pick up the installed icon.

@@ -26,7 +26,8 @@ ApplicationWindow {
     // button exits mid-scan, and "Scan now" can start a second scan over the
     // first.
     readonly property bool busy: backend.scanning || backend.state === "inspecting"
-                                  || backend.state === "extracting" || backend.state === "remuxing"
+                                  || backend.state === "extracting" || backend.state === "cropping"
+                                  || backend.state === "encoding" || backend.state === "remuxing"
 
     // Closing the window is a quit like any other: ask first while busy.
     onClosing: function(close) {
@@ -49,6 +50,8 @@ ApplicationWindow {
         case "review":
             return "review"
         case "extracting":
+        case "cropping":
+        case "encoding":
         case "remuxing":
             return "working"
         case "done":
@@ -209,6 +212,29 @@ ApplicationWindow {
                             color: "#c8c8d0"
                             wrapMode: Label.Wrap
                         }
+                        CheckBox {
+                            Layout.fillWidth: true
+                            visible: backend.ffmpegAvailable
+                            text: qsTr("Remove black bars")
+                            checked: backend.removeBars
+                            onToggled: backend.setRemoveBars(checked)
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: 4
+                            visible: backend.ffmpegAvailable
+                            text: qsTr("Re-encodes the video with the \u201c1080p x265 Slow and Low\u201d preset. Much slower than a remux.")
+                            color: "#9a9aa2"
+                            font.pixelSize: 12
+                            wrapMode: Label.Wrap
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            visible: !backend.ffmpegAvailable
+                            text: qsTr("ffmpeg is not installed, so black bars cannot be removed.")
+                            color: "#d08080"
+                            wrapMode: Label.Wrap
+                        }
                         Label {
                             Layout.fillWidth: true
                             text: qsTr("The original file will be replaced — it's moved to the trash if possible.")
@@ -314,6 +340,14 @@ ApplicationWindow {
                             font.pixelSize: 12
                             wrapMode: Label.Wrap
                         }
+                        Label {
+                            Layout.fillWidth: true
+                            visible: backend.barsDetectedCount > 0
+                            text: qsTr("%n file has black bars — tick to remove them.", "", backend.barsDetectedCount)
+                            color: "#c8c8d0"
+                            font.pixelSize: 12
+                            wrapMode: Label.Wrap
+                        }
 
                         ListView {
                             id: reviewList
@@ -379,6 +413,13 @@ ApplicationWindow {
                                             font.pixelSize: 12
                                             color: "#9a9aa2"
                                         }
+                                        CheckBox {
+                                            visible: modelData.bars
+                                            checked: modelData.removeBars
+                                            text: qsTr("Black bars")
+                                            font.pixelSize: 12
+                                            onToggled: backend.setQueueRemoveBars(index, checked)
+                                        }
                                         Label {
                                             Layout.fillWidth: true
                                             text: modelData.name
@@ -434,6 +475,14 @@ ApplicationWindow {
                                             anchors.margins: 8
                                             spacing: 4
 
+                                            Label {
+                                                Layout.fillWidth: true
+                                                visible: modelData.bars
+                                                text: qsTr("Cropped size: %1×%2").arg(modelData.cropWidth).arg(modelData.cropHeight)
+                                                font.pixelSize: 12
+                                                color: "#d8a050"
+                                            }
+
                                             Repeater {
                                                 model: modelData.tracks
 
@@ -478,6 +527,18 @@ ApplicationWindow {
                                 text: qsTr("Discard")
                                 Material.roundedScale: theme.radius
                                 onClicked: backend.reset()
+                            }
+                            Button {
+                                visible: backend.barsDetectedCount > 0
+                                text: qsTr("Select bars")
+                                Material.roundedScale: theme.radius
+                                onClicked: backend.setAllRemoveBars(true)
+                            }
+                            Button {
+                                visible: backend.barsDetectedCount > 0
+                                text: qsTr("Clear bars")
+                                Material.roundedScale: theme.radius
+                                onClicked: backend.setAllRemoveBars(false)
                             }
                             Item { Layout.fillWidth: true }
                             Button {
@@ -547,6 +608,12 @@ ApplicationWindow {
                                         color: modelData.state === "pending" ? "#8a8a92" : "#d8d8de"
                                     }
                                     Label {
+                                        visible: modelData.bars
+                                        text: modelData.cropped ? qsTr("bars removed") : qsTr("bars")
+                                        font.pixelSize: 11
+                                        color: modelData.cropped ? theme.accent : "#9a9aa2"
+                                    }
+                                    Label {
                                         visible: modelData.state === "pending"
                                         text: "✕"
                                         font.pixelSize: 13
@@ -600,7 +667,7 @@ ApplicationWindow {
 
                             BusyIndicator {
                                 Layout.alignment: Qt.AlignHCenter
-                                visible: backend.state === "extracting"
+                                visible: backend.state === "extracting" || backend.state === "cropping"
                                 running: visible
                             }
                             Label {
@@ -635,12 +702,12 @@ ApplicationWindow {
                             }
                             ProgressBar {
                                 Layout.fillWidth: true
-                                indeterminate: backend.state === "extracting"
+                                indeterminate: backend.state === "extracting" || backend.state === "cropping"
                                 value: backend.progress / 100
                             }
                             Label {
                                 Layout.alignment: Qt.AlignHCenter
-                                visible: backend.state === "remuxing"
+                                visible: backend.state === "remuxing" || backend.state === "encoding"
                                 text: backend.progress + "%"
                                 color: "#9a9aa2"
                             }
@@ -694,6 +761,13 @@ ApplicationWindow {
                             horizontalAlignment: Label.AlignHCenter
                             visible: !backend.batch && backend.extractedFiles.length > 0
                             text: qsTr("%n subtitle file extracted", "", backend.extractedFiles.length)
+                            color: "#c8c8d0"
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            horizontalAlignment: Label.AlignHCenter
+                            visible: !backend.batch && backend.cropped()
+                            text: qsTr("Black bars removed.")
                             color: "#c8c8d0"
                         }
                         Label {
@@ -1004,6 +1078,30 @@ ApplicationWindow {
                                 Layout.leftMargin: 4
                                 text: qsTr("Removes sound descriptions like [DOOR CLOSES] or (sighs), and speaker labels. The SDH-only subtitle file is replaced.")
                                 color: "#9a9aa2"
+                                font.pixelSize: 12
+                                wrapMode: Label.Wrap
+                            }
+
+                            CheckBox {
+                                Layout.fillWidth: true
+                                text: qsTr("Remove black bars")
+                                checked: settings.removeBars
+                                onToggled: settings.setRemoveBars(checked)
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                Layout.leftMargin: 4
+                                text: qsTr("Re-encodes video with the \u201c1080p x265 Slow and Low\u201d preset. Watched and scanned files with bars are processed automatically.")
+                                color: "#9a9aa2"
+                                font.pixelSize: 12
+                                wrapMode: Label.Wrap
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                Layout.leftMargin: 4
+                                visible: !backend.ffmpegAvailable
+                                text: qsTr("ffmpeg is not installed, so this option has no effect.")
+                                color: "#d08080"
                                 font.pixelSize: 12
                                 wrapMode: Label.Wrap
                             }

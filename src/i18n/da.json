@@ -91,5 +91,28 @@
   },
   "Discard": "Kassér",
   "Convert SDH subtitles to standard": "Konverter SDH-undertekster til standard",
-  "Removes sound descriptions like [DOOR CLOSES] or (sighs), and speaker labels. The SDH-only subtitle file is replaced.": "Fjerner lydbeskrivelser som [DØR LUKKES] eller (suk), og taleretiketter. Undertekstfilen med kun SDH erstattes."
+  "Removes sound descriptions like [DOOR CLOSES] or (sighs), and speaker labels. The SDH-only subtitle file is replaced.": "Fjerner lydbeskrivelser som [DØR LUKKES] eller (suk), og taleretiketter. Undertekstfilen med kun SDH erstattes.",
+  "Remove black bars": "Fjern sorte bjælker",
+  "Re-encodes the video with the “1080p x265 Slow and Low” preset. Much slower than a remux.": "Genkoder videoen med forindstillingen “1080p x265 Slow and Low”. Meget langsommere end en ompakning.",
+  "ffmpeg is not installed, so black bars cannot be removed.": "ffmpeg er ikke installeret, så sorte bjælker kan ikke fjernes.",
+  "%n file has black bars — tick to remove them.": {
+    "one": "%n fil har sorte bjælker — sæt kryds for at fjerne dem.",
+    "other": "%n filer har sorte bjælker — sæt kryds for at fjerne dem."
+  },
+  "Black bars": "Sorte bjælker",
+  "Cropped size: %1×%2": "Beskåret størrelse: %1×%2",
+  "Select bars": "Vælg bjælker",
+  "Clear bars": "Ryd bjælker",
+  "bars removed": "bjælker fjernet",
+  "bars": "bjælker",
+  "Black bars removed.": "Sorte bjælker fjernet.",
+  "Re-encodes video with the “1080p x265 Slow and Low” preset. Watched and scanned files with bars are processed automatically.": "Genkoder video med forindstillingen “1080p x265 Slow and Low”. Overvågede og scannede filer med bjælker behandles automatisk.",
+  "ffmpeg is not installed, so this option has no effect.": "ffmpeg er ikke installeret, så denne indstilling har ingen virkning.",
+  "Looking for black bars…": "Leder efter sorte bjælker…",
+  "Removing black bars…": "Fjerner sorte bjælker…",
+  "ffmpeg is required to remove black bars.": "ffmpeg kræves for at fjerne sorte bjælker.",
+  "Black-bar detection failed.": "Registrering af sorte bjælker mislykkedes.",
+  "Re-encoding the video failed.": "Genkodning af videoen mislykkedes.",
+  "The cleaned file could not be prepared.": "Den rensede fil kunne ikke klargøres.",
+  "The cleaned file could not be moved into place; it was left as %1.": "Den rensede fil kunne ikke flyttes på plads; den blev efterladt som %1."
 }

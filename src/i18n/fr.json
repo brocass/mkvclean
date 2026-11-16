@@ -91,5 +91,28 @@
   },
   "Discard": "Tout abandonner",
   "Convert SDH subtitles to standard": "Convertir les sous-titres SDH en standard",
-  "Removes sound descriptions like [DOOR CLOSES] or (sighs), and speaker labels. The SDH-only subtitle file is replaced.": "Supprime les descriptions sonores comme [PORTE SE FERME] ou (soupir), et les noms de locuteurs. Le fichier de sous-titres SDH est remplacé."
+  "Removes sound descriptions like [DOOR CLOSES] or (sighs), and speaker labels. The SDH-only subtitle file is replaced.": "Supprime les descriptions sonores comme [PORTE SE FERME] ou (soupir), et les noms de locuteurs. Le fichier de sous-titres SDH est remplacé.",
+  "Remove black bars": "Supprimer les bandes noires",
+  "Re-encodes the video with the “1080p x265 Slow and Low” preset. Much slower than a remux.": "Réencode la vidéo avec le préréglage « 1080p x265 Slow and Low ». Bien plus lent qu'un remux.",
+  "ffmpeg is not installed, so black bars cannot be removed.": "ffmpeg n'est pas installé, les bandes noires ne peuvent donc pas être supprimées.",
+  "%n file has black bars — tick to remove them.": {
+    "one": "%n fichier a des bandes noires — cochez pour les supprimer.",
+    "other": "%n fichiers ont des bandes noires — cochez pour les supprimer."
+  },
+  "Black bars": "Bandes noires",
+  "Cropped size: %1×%2": "Taille recadrée : %1×%2",
+  "Select bars": "Sélectionner les bandes",
+  "Clear bars": "Désélectionner les bandes",
+  "bars removed": "bandes supprimées",
+  "bars": "bandes",
+  "Black bars removed.": "Bandes noires supprimées.",
+  "Re-encodes video with the “1080p x265 Slow and Low” preset. Watched and scanned files with bars are processed automatically.": "Réencode la vidéo avec le préréglage « 1080p x265 Slow and Low ». Les fichiers surveillés et analysés avec des bandes sont traités automatiquement.",
+  "ffmpeg is not installed, so this option has no effect.": "ffmpeg n'est pas installé, cette option n'a donc aucun effet.",
+  "Looking for black bars…": "Recherche des bandes noires…",
+  "Removing black bars…": "Suppression des bandes noires…",
+  "ffmpeg is required to remove black bars.": "ffmpeg est requis pour supprimer les bandes noires.",
+  "Black-bar detection failed.": "La détection des bandes noires a échoué.",
+  "Re-encoding the video failed.": "Le réencodage de la vidéo a échoué.",
+  "The cleaned file could not be prepared.": "Le fichier nettoyé n'a pas pu être préparé.",
+  "The cleaned file could not be moved into place; it was left as %1.": "Le fichier nettoyé n'a pas pu être déplacé en place ; il a été laissé sous %1."
 }

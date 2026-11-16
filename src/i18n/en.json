@@ -26,5 +26,9 @@
   "Clean %n files": {
     "one": "Clean %n file",
     "other": "Clean %n files"
+  },
+  "%n file has black bars — tick to remove them.": {
+    "one": "%n file has black bars — tick to remove it.",
+    "other": "%n files have black bars — tick to remove them."
   }
 }

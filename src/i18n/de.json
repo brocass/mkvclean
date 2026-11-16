@@ -91,5 +91,28 @@
   },
   "Discard": "Verwerfen",
   "Convert SDH subtitles to standard": "SDH-Untertitel in Standard umwandeln",
-  "Removes sound descriptions like [DOOR CLOSES] or (sighs), and speaker labels. The SDH-only subtitle file is replaced.": "Entfernt Geräuschebeschreibungen wie [TÜR SCHLIESSST] oder (seufzt) und Sprecherbezeichnungen. Die reine SDH-Untertiteldatei wird ersetzt."
+  "Removes sound descriptions like [DOOR CLOSES] or (sighs), and speaker labels. The SDH-only subtitle file is replaced.": "Entfernt Geräuschebeschreibungen wie [TÜR SCHLIESSST] oder (seufzt) und Sprecherbezeichnungen. Die reine SDH-Untertiteldatei wird ersetzt.",
+  "Remove black bars": "Schwarze Balken entfernen",
+  "Re-encodes the video with the “1080p x265 Slow and Low” preset. Much slower than a remux.": "Kodiert das Video mit der Voreinstellung „1080p x265 Slow and Low“ neu. Viel langsamer als ein Remux.",
+  "ffmpeg is not installed, so black bars cannot be removed.": "ffmpeg ist nicht installiert, daher können schwarze Balken nicht entfernt werden.",
+  "%n file has black bars — tick to remove them.": {
+    "one": "%n Datei hat schwarze Balken – zum Entfernen anhaken.",
+    "other": "%n Dateien haben schwarze Balken – zum Entfernen anhaken."
+  },
+  "Black bars": "Schwarze Balken",
+  "Cropped size: %1×%2": "Zugeschnittene Größe: %1×%2",
+  "Select bars": "Balken auswählen",
+  "Clear bars": "Balken abwählen",
+  "bars removed": "Balken entfernt",
+  "bars": "Balken",
+  "Black bars removed.": "Schwarze Balken entfernt.",
+  "Re-encodes video with the “1080p x265 Slow and Low” preset. Watched and scanned files with bars are processed automatically.": "Kodiert Video mit der Voreinstellung „1080p x265 Slow and Low“ neu. Überwachte und gescannte Dateien mit Balken werden automatisch verarbeitet.",
+  "ffmpeg is not installed, so this option has no effect.": "ffmpeg ist nicht installiert, daher hat diese Option keine Wirkung.",
+  "Looking for black bars…": "Suche nach schwarzen Balken…",
+  "Removing black bars…": "Entferne schwarze Balken…",
+  "ffmpeg is required to remove black bars.": "ffmpeg wird zum Entfernen schwarzer Balken benötigt.",
+  "Black-bar detection failed.": "Erkennung schwarzer Balken fehlgeschlagen.",
+  "Re-encoding the video failed.": "Neukodierung des Videos fehlgeschlagen.",
+  "The cleaned file could not be prepared.": "Die bereinigte Datei konnte nicht vorbereitet werden.",
+  "The cleaned file could not be moved into place; it was left as %1.": "Die bereinigte Datei konnte nicht an ihren Platz verschoben werden; sie wurde als %1 belassen."
 }

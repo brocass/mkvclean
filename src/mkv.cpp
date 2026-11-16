@@ -3,6 +3,7 @@
 #include <QCollator>
 #include <QDirIterator>
 #include <QFileInfo>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QRegularExpression>
@@ -49,6 +50,13 @@ QList<MkvTrack> Mkv::parseTracks(const QJsonDocument &identification) {
         // mkvmerge spells the flag "flag_hearing_impaired" in its JSON.
         track.isHearingImpaired = properties.value("flag_hearing_impaired").toBool() ||
                                   properties.value("hearing_impaired").toBool();
+        const QString dimensions = properties.value("pixel_dimensions")
+                                       .toString(properties.value("display_dimensions").toString());
+        const auto sides = dimensions.split('x');
+        if (sides.size() == 2) {
+            track.width = sides.at(0).toInt();
+            track.height = sides.at(1).toInt();
+        }
         if (track.id >= 0 && !track.type.isEmpty())
             tracks.append(track);
     }
@@ -289,5 +297,130 @@ QStringList Mkv::remuxArguments(const QString &inputPath, const QString &outputP
         if (track.type == "video" || track.id == plan.keepAudioId)
             arguments << "--track-name" << QString("%1:").arg(track.id);
     arguments << inputPath;
+    return arguments;
+}
+
+qint64 Mkv::durationMs(const QJsonDocument &identification) {
+    const auto container = identification.object().value("container").toObject();
+    const auto value = container.value("properties").toObject().value("duration");
+    const double nanoseconds = value.toVariant().toDouble();
+    return nanoseconds > 0 ? static_cast<qint64>(nanoseconds / 1000000.0) : 0;
+}
+
+QStringList Mkv::cropDetectArguments(const QString &inputPath, qint64 durationMs) {
+    // Keyframes alone are enough to see where the picture ends, and decoding
+    // only those keeps even a 4K library scan cheap. Fades and title cards
+    // are excluded by starting a little way in.
+    QStringList arguments{"-hide_banner", "-nostdin", "-loglevel", "info"};
+    qint64 startMs = 0, spanMs = 0;
+    if (durationMs > 120000) {
+        startMs = durationMs / 20;             // 5%
+        spanMs = durationMs - 2 * startMs;     // up to 90%
+    }
+    if (startMs > 0)
+        arguments << "-ss" << QString::number(startMs / 1000.0, 'f', 3);
+    arguments << "-skip_frame" << "nokey" << "-i" << inputPath;
+    if (spanMs > 0)
+        arguments << "-t" << QString::number(spanMs / 1000.0, 'f', 3);
+    arguments << "-map" << "0:v:0" << "-an" << "-sn" << "-dn"
+              << "-vf" << "cropdetect=limit=24:round=2:reset=0:skip=0"
+              << "-f" << "null" << "-";
+    return arguments;
+}
+
+MkvCrop Mkv::parseCrop(const QString &output, int sourceWidth, int sourceHeight) {
+    static const QRegularExpression expression("crop=(\\d+):(\\d+):(-?\\d+):(-?\\d+)");
+    auto matches = expression.globalMatch(output);
+    // A single odd frame (a fade, a dark scene) must not win: take the most
+    // common plausible rectangle across the sample.
+    QList<QString> order;
+    QHash<QString, int> counts;
+    QHash<QString, MkvCrop> crops;
+    while (matches.hasNext()) {
+        const auto match = matches.next();
+        const QString key = match.captured(0);
+        if (!counts.contains(key))
+            order.append(key);
+        ++counts[key];
+        MkvCrop crop;
+        crop.sourceWidth = sourceWidth;
+        crop.sourceHeight = sourceHeight;
+        crop.width = match.captured(1).toInt();
+        crop.height = match.captured(2).toInt();
+        crop.x = qMax(0, match.captured(3).toInt());
+        crop.y = qMax(0, match.captured(4).toInt());
+        crops.insert(key, crop);
+    }
+
+    MkvCrop best;
+    int bestCount = 0;
+    for (const auto &key : order) {
+        const MkvCrop crop = crops.value(key);
+        if (!crop.isValid())
+            continue;
+        if (sourceWidth > 0 && sourceHeight > 0) {
+            // A full-frame crop is a video without bars; a rectangle smaller
+            // than a quarter of the frame is a black scene, not letterboxing.
+            if (crop.width >= sourceWidth && crop.height >= sourceHeight)
+                continue;
+            if (crop.width < sourceWidth / 4 || crop.height < sourceHeight / 4)
+                continue;
+        }
+        if (counts.value(key) > bestCount) {
+            best = crop;
+            bestCount = counts.value(key);
+        }
+    }
+    return best;
+}
+
+QStringList Mkv::encodeArguments(const QString &inputPath, const QString &outputPath,
+                                 const MkvPlan &plan, const MkvCrop &crop) {
+    QStringList arguments{"-hide_banner", "-nostdin", "-y", "-loglevel", "warning",
+                          "-i", inputPath, "-map", "0:v:0"};
+
+    // mkvmerge track ids and ffmpeg stream indices differ; audio streams are
+    // numbered in container order, which is the order makePlan preserved.
+    int audioOrdinal = -1, ordinal = 0;
+    for (const auto &track : plan.tracks) {
+        if (track.type != "audio")
+            continue;
+        if (track.id == plan.keepAudioId) {
+            audioOrdinal = ordinal;
+            break;
+        }
+        ++ordinal;
+    }
+    if (audioOrdinal >= 0)
+        arguments << "-map" << QString("0:a:%1").arg(audioOrdinal);
+    else
+        arguments << "-an";
+    arguments << "-map_chapters" << "0" << "-map_metadata" << "0";
+
+    // The "1080p x265 Slow and Low" preset: x265 10-bit, slow, RF 21.5, plus
+    // the advanced option string stored in the preset.
+    arguments << "-c:v" << "libx265" << "-preset" << "slow" << "-crf" << "21.5"
+              << "-pix_fmt" << "yuv420p10le"
+              << "-x265-params"
+              << "strong-intra-smoothing=0:rect=0:aq-mode=1:rd=4:psy-rd=0.75:"
+                 "psy-rdoq=4.0:rdoq-level=1:rskip=2";
+
+    // Crop first, deinterlace the frames flagged as interlaced (HandBrake's
+    // preset uses decomb; ffmpeg has no decomb filter, but yadif with
+    // deint=interlaced is a pass-through for progressive video), then shrink
+    // to the preset's 1920x1080 ceiling. The bounds are the smaller of the
+    // target and the input, so a DVD never grows.
+    QStringList filters;
+    if (crop.isValid())
+        filters << "crop=" + crop.filter();
+    filters << "yadif=deint=interlaced";
+    filters << "scale=w='min(1920,iw)':h='min(1080,ih)':"
+               "force_original_aspect_ratio=decrease:force_divisible_by=2";
+    arguments << "-vf" << filters.join(',') << "-fps_mode" << "passthrough";
+
+    if (audioOrdinal >= 0)
+        arguments << "-c:a" << "copy";
+    arguments << "-sn" << "-progress" << "pipe:1" << "-nostats"
+              << "-f" << "matroska" << outputPath;
     return arguments;
 }

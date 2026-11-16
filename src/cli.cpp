@@ -33,6 +33,7 @@ void printSingleResult(const Backend &backend, bool json) {
             {"subtitles", QJsonArray::fromStringList(backend.extractedFiles())},
             {"kept_audio", keptAudio},
             {"removed", QJsonObject{{"tracks", plan.removedCount()}}},
+            {"cropped", backend.cropped()},
         };
         QTextStream(stdout) << QJsonDocument(result).toJson(QJsonDocument::Compact) << "\n";
     } else {
@@ -56,6 +57,7 @@ int printBatchResults(const QVariantList &queue, bool json) {
                 result.insert("output", path);
                 result.insert("subtitles", QJsonArray::fromStringList(map.value("subtitles").toStringList()));
                 result.insert("kept_audio", QJsonObject{{"id", map.value("keptAudioId").toInt()}});
+                result.insert("cropped", map.value("cropped").toBool());
             } else {
                 result.insert("error", map.value("error").toString());
                 ++failed;
@@ -75,10 +77,12 @@ int printBatchResults(const QVariantList &queue, bool json) {
 
 }
 
-int runClean(QCoreApplication &app, const QStringList &inputs, bool json) {
+int runClean(QCoreApplication &app, const QStringList &inputs, bool json, int cropOverride) {
     Backend backend(nullptr, &app);
     AppSettings settings;
     backend.setSettings(&settings);
+    if (cropOverride >= 0)
+        backend.setCropOverride(cropOverride == 1);
     int exitCode = 1;
 
     QObject::connect(&backend, &Backend::stateChanged, &app, [&] {
@@ -194,8 +198,12 @@ int runWatch(QCoreApplication &app, const QStringList &args) {
             return 1;
         }
         const bool json = args.contains("--json");
+        const int cropOverride = args.contains("--no-remove-bars") ? 0
+                                 : args.contains("--remove-bars") ? 1 : -1;
         Backend backend(nullptr, &app);
         backend.setSettings(&settings);
+        if (cropOverride >= 0)
+            backend.setCropOverride(cropOverride == 1);
         int exitCode = 1;
         QObject::connect(&backend, &Backend::stateChanged, &app, [&] {
             const QString state = backend.state();

@@ -3,6 +3,7 @@
 #include <QDateTime>
 #include <QObject>
 #include <QProcess>
+#include <QSet>
 #include <QStringList>
 #include <QTimer>
 #include <QVariantList>
@@ -41,6 +42,10 @@ class Backend : public QObject {
     Q_PROPERTY(bool scanFoundNothing READ scanFoundNothing NOTIFY stateChanged)
     Q_PROPERTY(int scanIndex READ scanIndex NOTIFY progressChanged)
     Q_PROPERTY(int scanTotal READ scanTotal NOTIFY stateChanged)
+    Q_PROPERTY(bool ffmpegAvailable READ ffmpegAvailable CONSTANT)
+    Q_PROPERTY(bool removeBars READ removeBars NOTIFY stateChanged)
+    Q_PROPERTY(int barsDetectedCount READ barsDetectedCount NOTIFY stateChanged)
+    Q_PROPERTY(int barsSelectedCount READ barsSelectedCount NOTIFY stateChanged)
     Q_PROPERTY(bool watchServiceActive READ watchServiceActive NOTIFY serviceStatusChanged)
 
 public:
@@ -48,7 +53,7 @@ public:
     // timeout are injectable for tests.
     explicit Backend(FilePicker *picker, QObject *parent = nullptr,
                      const QString &mkvmerge = {}, const QString &mkvextract = {},
-                     int inspectTimeoutMs = 30000);
+                     int inspectTimeoutMs = 30000, const QString &ffmpeg = {});
 
     QString state() const;
     QString sourcePath() const { return m_sourcePath; }
@@ -73,6 +78,11 @@ public:
     bool scanFoundNothing() const { return m_scanFoundNothing; }
     int scanIndex() const { return m_scanDone; }
     int scanTotal() const { return m_scanList.size(); }
+    bool ffmpegAvailable() const;
+    bool removeBars() const;
+    int barsDetectedCount() const;
+    int barsSelectedCount() const;
+    bool cropped() const;
     bool watchServiceActive() const { return m_serviceActive; }
 
     MkvPlan plan() const { return m_plan; }
@@ -92,6 +102,11 @@ public:
     Q_INVOKABLE void pickExcludeFolder();
     Q_INVOKABLE void setWatchServiceEnabled(bool enabled);
     Q_INVOKABLE void refreshServiceStatus();
+    Q_INVOKABLE void setRemoveBars(bool enabled);
+    Q_INVOKABLE void setQueueRemoveBars(int index, bool enabled);
+    Q_INVOKABLE void setAllRemoveBars(bool enabled);
+    // Headless callers decide once, instead of persisting a preference.
+    void setCropOverride(bool enabled) { m_cropOverride = enabled ? 1 : 0; }
     Q_INVOKABLE void clean();
     Q_INVOKABLE void cancel();
     Q_INVOKABLE void reset();
@@ -103,27 +118,38 @@ signals:
     void serviceStatusChanged();
 
 private:
-    enum class Stage { Idle, Inspecting, Ready, Review, Extracting, Remuxing, Done, Error };
+    enum class Stage { Idle, Inspecting, Ready, Review, Extracting, Cropping, Encoding, Remuxing, Done, Error };
 
     bool busy() const;
     void setStage(Stage stage);
-    void initQueue(const QStringList &files, const QHash<QString, QVariantList> &tracksByPath = {});
+    void initQueue(const QStringList &files, const QHash<QString, QVariantList> &tracksByPath = {},
+                   const QHash<QString, MkvCrop> &cropsByPath = {},
+                   const QHash<QString, bool> &needsWorkByPath = {});
     void inspect(const QString &path);
     void advance();
     void removeQueueRow(int index);
     void recordQueueError(const QString &message);
     int countStates(const char *state) const;
+    bool cropSelected(int index) const;
+    bool removeBarsDefault() const;
     void startExtraction();
+    void startBars();
     void startRemux();
+    void startVideoEncode();
+    void prepareTempOutput();
+    void finishOutput(bool cropped);
     bool convertSdhSubtitle(MkvExtractJob &job);
     void pumpScanPool();
     void probeFinished(QProcess *process);
+    void retireScanProbe(QProcess *process);
     void finishScan();
     QString subtitleLanguage() const;
     QString audioLanguage() const;
     void failWith(const QString &message);
     void processFinished(int code, QProcess::ExitStatus status);
-    void parseRemuxOutput();
+    void parseToolOutput();
+    void readStderr();
+    void clearCropState();
 
     Stage m_stage = Stage::Idle;
     QString m_sourcePath;
@@ -138,6 +164,16 @@ private:
     int m_progress = 0;
     bool m_cancelling = false;
 
+    // Black-bar removal for the current file. m_cropKnown distinguishes "the
+    // probe says there are none" from "not looked yet".
+    MkvCrop m_crop;
+    bool m_cropKnown = false;
+    qint64 m_durationMs = 0;
+    int m_sourceWidth = 0;
+    int m_sourceHeight = 0;
+    QByteArray m_stderrTail;   // last of ffmpeg's/mkvmerge's stderr, for errors
+    QByteArray m_stdoutBuffer; // partial line held between progress reads
+
     // The batch queue; a single file is a queue of one that pauses at Ready.
     QStringList m_queuePaths;
     QStringList m_queueStates;        // "pending" | "active" | "done" | "error"
@@ -145,8 +181,14 @@ private:
     QList<QStringList> m_queueExtracted;
     QList<int> m_queueKeptAudioIds;
     QList<QVariantList> m_queueTracks;  // per-file track plan, when known (scans)
+    QList<MkvCrop> m_queueCrops;
+    QList<bool> m_queueCropKnown;
+    QList<bool> m_queueRemoveBars;  // the per-row tick in the review list
+    QList<bool> m_queueNeedsWork;   // stripped tracks or extractable subtitles
+    QList<bool> m_queueCropped;
     int m_queueIndex = -1;
     bool m_batchAborted = false;
+    int m_cropOverride = -1;  // CLI: -1 follows the setting, 0 off, 1 on
 
     // Library scan ("pick up what was missed"): probe every MKV first, then
     // batch only the ones that still need cleaning.
@@ -164,10 +206,16 @@ private:
     QList<QProcess *> m_scanPool;
     QHash<QProcess *, QString> m_scanProbeFile;
     QHash<QProcess *, QDateTime> m_scanProbeStarted;
+    QSet<QProcess *> m_scanCropping;  // the probe is done; this one is cropdetect
     QHash<QString, QVariantList> m_scanTrackLists;
+    QHash<QString, MkvCrop> m_scanCrops;
+    QHash<QString, bool> m_scanNeedsWork;
+    QHash<QString, int> m_scanSourceWidth;
+    QHash<QString, int> m_scanSourceHeight;
     QTimer m_scanTick;
     QTimer m_inspectTimeout;
     int m_inspectTimeoutMs;
+    int m_cropTimeoutMs = 600000;  // keyframe crop probes are much slower
 
     // What the open folder picker's result is for: a cleaning job, a new
     // watched folder, or a new excluded folder.
@@ -179,7 +227,7 @@ private:
     bool m_reviewAfterScan = false;
 
     AppSettings *m_settings = nullptr;
-    QString m_mkvmerge, m_mkvextract;
+    QString m_mkvmerge, m_mkvextract, m_ffmpeg;
     QProcess m_process;
     FilePicker *m_picker;
 };

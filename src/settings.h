@@ -16,6 +16,7 @@ class AppSettings : public QObject {
     Q_PROPERTY(QString audioLanguage READ audioLanguage NOTIFY changed)
     Q_PROPERTY(QString subtitleLanguage READ subtitleLanguage NOTIFY changed)
     Q_PROPERTY(bool convertSdh READ convertSdh NOTIFY changed)
+    Q_PROPERTY(bool removeBars READ removeBars NOTIFY changed)
     Q_PROPERTY(QVariantList languageModel READ languageModel CONSTANT)
 
 public:
@@ -30,6 +31,7 @@ public:
     QString audioLanguage() const { return m_audioLanguage; }
     QString subtitleLanguage() const { return m_subtitleLanguage; }
     bool convertSdh() const { return m_convertSdh; }
+    bool removeBars() const { return m_removeBars; }
     QVariantList languageModel() const;
 
     Q_INVOKABLE void addWatchFolder(const QString &folder);
@@ -39,6 +41,7 @@ public:
     Q_INVOKABLE void setAudioLanguage(const QString &code);
     Q_INVOKABLE void setSubtitleLanguage(const QString &code);
     Q_INVOKABLE void setConvertSdh(bool enabled);
+    Q_INVOKABLE void setRemoveBars(bool enabled);
 
 signals:
     void changed();
@@ -46,7 +49,8 @@ signals:
 private:
     void load(const QString &legacyPath);
     bool readConfig(QStringList *watchFolders, QStringList *excludedFolders,
-                    QString *audioLanguage, QString *subtitleLanguage, bool *convertSdh);
+                    QString *audioLanguage, QString *subtitleLanguage, bool *convertSdh,
+                    bool *removeBars);
     void watchConfigDirectory();
     void reload();
     bool save();
@@ -58,5 +62,6 @@ private:
     QString m_audioLanguage = "eng";
     QString m_subtitleLanguage = "eng";
     bool m_convertSdh = false;
+    bool m_removeBars = false;
     QFileSystemWatcher *m_configWatcher = nullptr;
 };

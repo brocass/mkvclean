@@ -26,6 +26,10 @@ MKVToolNix (`mkvmerge`, `mkvextract`).
   goes to the trash (recoverable), and the cleaned file takes its place.
   Leftover track names ("English [Original]") are blanked so players show
   the language instead.
+- **Optional black-bar removal**: letterboxed videos are detected during the
+  review and scan, and ticked to crop; the re-encode follows the HandBrake
+  "1080p x265 Slow and Low" preset (10-bit HEVC, slow, CRF 21.5, variable
+  frame rate, audio copied, chapters kept). Needs `ffmpeg`.
 - **Emby-proof**: if the original is busy (a scan, credit detection, a
   player), the verified remux is left behind as `Movie.mkv.remux` and the
   watch service completes the swap automatically on a later pass.
@@ -36,8 +40,8 @@ MKVToolNix (`mkvmerge`, `mkvextract`).
   watched folders once they finish copying, with excluded folders (a Music
   Videos folder, say) and a manual **Scan now** for anything missed.
 - **Settings panel** (`S`): watched folders, excluded folders, preferred
-  audio and subtitle languages (~50 languages), and the service toggle.
-  Shared by the GUI, the CLI, and the service.
+  audio and subtitle languages (~50 languages), black-bar removal, and the
+  service toggle. Shared by the GUI, the CLI, and the service.
 - **Headless CLI + agent skill**: `mkvclean clean` and `mkvclean watch …`
   with JSON output for scripts; `mkvclean skill install` teaches your agent.
 - **Omarchy-native**: follows the theme accent and window rounding live, and
@@ -64,11 +68,13 @@ a bad file is marked and skipped, and Cancel stops the batch early.
 
 ## From the command line
 
-`mkvclean clean <file-or-folder>… [--json]` runs the whole job without a
-display — including replacing the originals. Folders are scanned recursively
-for MKVs. One file prints a single JSON summary; several print one JSON
-object per line, each with `"status": "ok"` or `"error"`. Exit is 0 when
-everything was cleaned, 1 if anything failed. `mkvclean skill install`
+`mkvclean clean <file-or-folder>… [--json] [--remove-bars|--no-remove-bars]`
+runs the whole job without a display — including replacing the originals.
+Folders are scanned recursively for MKVs. One file prints a single JSON
+summary; several print one JSON object per line, each with `"status": "ok"`
+or `"error"`. `--remove-bars` crops letterboxing for this run without
+changing the saved setting (and `--no-remove-bars` leaves it alone). Exit is
+0 when everything was cleaned, 1 if anything failed. `mkvclean skill install`
 installs a short agent skill describing it.
 
 ## Watch service

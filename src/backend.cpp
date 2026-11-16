@@ -16,25 +16,32 @@
 #include "settings.h"
 
 Backend::Backend(FilePicker *picker, QObject *parent, const QString &mkvmerge, const QString &mkvextract,
-                 int inspectTimeoutMs)
+                 int inspectTimeoutMs, const QString &ffmpeg)
     : QObject(parent),
+      m_inspectTimeoutMs(inspectTimeoutMs),
       m_mkvmerge(mkvmerge.isEmpty() ? QStandardPaths::findExecutable("mkvmerge") : mkvmerge),
       m_mkvextract(mkvextract.isEmpty() ? QStandardPaths::findExecutable("mkvextract") : mkvextract),
-      m_picker(picker),
-      m_inspectTimeoutMs(inspectTimeoutMs) {
+      m_ffmpeg(ffmpeg.isEmpty() ? QStandardPaths::findExecutable("ffmpeg") : ffmpeg),
+      m_picker(picker) {
+    // Crop detection decodes keyframes across the whole file, so it needs
+    // longer than an identification probe; a 4K film on a slow disk is not
+    // hung, just slow.
+    m_cropTimeoutMs = qMax(inspectTimeoutMs, 600000);
     m_inspectTimeout.setSingleShot(true);
     m_inspectTimeout.setInterval(inspectTimeoutMs);
     connect(&m_inspectTimeout, &QTimer::timeout, this, [this] {
-        if (m_stage == Stage::Inspecting)
+        if (m_stage == Stage::Inspecting || m_stage == Stage::Cropping)
             m_process.kill();
     });
     // The scan pool's watchdog: kill any probe that has hung too long.
     m_scanTick.setInterval(1000);
     connect(&m_scanTick, &QTimer::timeout, this, [this] {
         const auto now = QDateTime::currentDateTime();
-        for (auto it = m_scanProbeStarted.begin(); it != m_scanProbeStarted.end(); ++it)
-            if (it.value().msecsTo(now) >= m_inspectTimeoutMs)
+        for (auto it = m_scanProbeStarted.begin(); it != m_scanProbeStarted.end(); ++it) {
+            const int limit = m_scanCropping.contains(it.key()) ? m_cropTimeoutMs : m_inspectTimeoutMs;
+            if (it.value().msecsTo(now) >= limit)
                 it.key()->kill();
+        }
     });
 
     if (m_picker) {
@@ -70,7 +77,10 @@ Backend::Backend(FilePicker *picker, QObject *parent, const QString &mkvmerge, c
     });
 
     // mkvmerge reports "#GUI#progress 42%" and "#GUI#error …" on stdout.
-    connect(&m_process, &QProcess::readyReadStandardOutput, this, &Backend::parseRemuxOutput);
+    connect(&m_process, &QProcess::readyReadStandardOutput, this, &Backend::parseToolOutput);
+    // ffmpeg's cropdetect and errors arrive on stderr; drain it so the pipe
+    // cannot fill, and keep the tail for a useful failure message.
+    connect(&m_process, &QProcess::readyReadStandardError, this, &Backend::readStderr);
     connect(&m_process, &QProcess::finished, this, &Backend::processFinished);
 
     if (!toolsAvailable()) {
@@ -83,10 +93,84 @@ bool Backend::toolsAvailable() const {
     return QFileInfo(m_mkvmerge).isExecutable() && QFileInfo(m_mkvextract).isExecutable();
 }
 
+bool Backend::ffmpegAvailable() const {
+    return QFileInfo(m_ffmpeg).isExecutable();
+}
+
+bool Backend::removeBarsDefault() const {
+    if (m_cropOverride >= 0)
+        return m_cropOverride == 1;
+    return m_settings && m_settings->removeBars();
+}
+
+bool Backend::cropSelected(int index) const {
+    if (index < 0 || index >= m_queueRemoveBars.size())
+        return removeBarsDefault();
+    return m_queueRemoveBars.at(index);
+}
+
+bool Backend::removeBars() const {
+    return cropSelected(m_queueIndex);
+}
+
+int Backend::barsDetectedCount() const {
+    int count = 0;
+    for (const auto &crop : m_queueCrops)
+        if (crop.hasBars())
+            ++count;
+    return count;
+}
+
+int Backend::barsSelectedCount() const {
+    int count = 0;
+    for (int i = 0; i < m_queueCrops.size(); ++i)
+        if (m_queueCrops.at(i).hasBars() && m_queueRemoveBars.value(i))
+            ++count;
+    return count;
+}
+
+bool Backend::cropped() const {
+    return m_queueCropped.value(m_queueIndex, false);
+}
+
+void Backend::setRemoveBars(bool enabled) {
+    if (m_queueIndex >= 0 && m_queueIndex < m_queueRemoveBars.size()) {
+        if (m_queueRemoveBars.at(m_queueIndex) == enabled)
+            return;
+        m_queueRemoveBars[m_queueIndex] = enabled;
+        emit stateChanged();
+        return;
+    }
+    if (m_settings)
+        m_settings->setRemoveBars(enabled);
+}
+
+void Backend::setQueueRemoveBars(int index, bool enabled) {
+    if (index < 0 || index >= m_queueRemoveBars.size())
+        return;
+    if (m_queueRemoveBars.at(index) == enabled)
+        return;
+    m_queueRemoveBars[index] = enabled;
+    emit stateChanged();
+}
+
+void Backend::setAllRemoveBars(bool enabled) {
+    bool changed = false;
+    for (int i = 0; i < m_queueCrops.size(); ++i) {
+        if (!m_queueCrops.at(i).hasBars() || m_queueRemoveBars.value(i) == enabled)
+            continue;
+        m_queueRemoveBars[i] = enabled;
+        changed = true;
+    }
+    if (changed)
+        emit stateChanged();
+}
+
 bool Backend::busy() const {
     // A scan leaves the stage at Idle but is very much work in progress:
     // treat it as busy so it cannot be reset, restarted, or opened over.
     return m_scanning || m_stage == Stage::Inspecting || m_stage == Stage::Extracting
+           || m_stage == Stage::Cropping || m_stage == Stage::Encoding
            || m_stage == Stage::Remuxing;
 }
 
@@ -97,6 +181,8 @@ QString Backend::state() const {
     case Stage::Ready: return "ready";
     case Stage::Review: return "review";
     case Stage::Extracting: return "extracting";
+    case Stage::Cropping: return "cropping";
+    case Stage::Encoding: return "encoding";
     case Stage::Remuxing: return "remuxing";
     case Stage::Done: return "done";
     case Stage::Error: return "error";
@@ -114,6 +200,8 @@ QString Backend::statusText() const {
     switch (m_stage) {
     case Stage::Inspecting: return tr("Inspecting…");
     case Stage::Extracting: return tr("Extracting subtitles…");
+    case Stage::Cropping: return tr("Looking for black bars…");
+    case Stage::Encoding: return tr("Removing black bars…");
     case Stage::Remuxing: return tr("Writing cleaned file…");
     default: return {};
     }
@@ -173,6 +261,12 @@ QVariantList Backend::queue() const {
             {"subtitles", m_queueExtracted.value(i)},
             {"keptAudioId", m_queueKeptAudioIds.value(i, -1)},
             {"tracks", m_queueTracks.value(i)},
+            {"bars", m_queueCrops.value(i).hasBars()},
+            {"cropWidth", m_queueCrops.value(i).width},
+            {"cropHeight", m_queueCrops.value(i).height},
+            {"removeBars", m_queueRemoveBars.value(i)},
+            {"cropped", m_queueCropped.value(i)},
+            {"needsWork", m_queueNeedsWork.value(i)},
         });
     return list;
 }
@@ -258,19 +352,37 @@ void Backend::openPaths(const QStringList &paths) {
     advance();
 }
 
-void Backend::initQueue(const QStringList &files, const QHash<QString, QVariantList> &tracksByPath) {
+void Backend::initQueue(const QStringList &files, const QHash<QString, QVariantList> &tracksByPath,
+                        const QHash<QString, MkvCrop> &cropsByPath,
+                        const QHash<QString, bool> &needsWorkByPath) {
     m_queuePaths = files;
     m_queueStates.clear();
     m_queueErrors.clear();
     m_queueExtracted.clear();
     m_queueKeptAudioIds.clear();
     m_queueTracks.clear();
+    m_queueCrops.clear();
+    m_queueCropKnown.clear();
+    m_queueRemoveBars.clear();
+    m_queueNeedsWork.clear();
+    m_queueCropped.clear();
     for (int i = 0; i < files.size(); ++i) {
+        const QString &file = files.at(i);
+        const MkvCrop crop = cropsByPath.value(file);
+        const bool cropKnown = cropsByPath.contains(file);
         m_queueStates.append("pending");
         m_queueErrors.append(QString());
         m_queueExtracted.append(QStringList());
         m_queueKeptAudioIds.append(-1);
-        m_queueTracks.append(tracksByPath.value(files.at(i)));
+        m_queueTracks.append(tracksByPath.value(file));
+        m_queueCrops.append(crop);
+        m_queueCropKnown.append(cropKnown);
+        // A scan already knows whether there are bars; the tick defaults to
+        // the setting, but a bar-less file never starts ticked. Files opened
+        // directly have not been probed yet, so they follow the setting.
+        m_queueRemoveBars.append(removeBarsDefault() && (!cropKnown || crop.hasBars()));
+        m_queueNeedsWork.append(needsWorkByPath.value(file, true));
+        m_queueCropped.append(false);
     }
     m_queueIndex = -1;
     m_batchAborted = false;
@@ -286,6 +398,15 @@ void Backend::advance() {
     inspect(m_queuePaths.at(m_queueIndex));
 }
 
+void Backend::clearCropState() {
+    m_crop = {};
+    m_cropKnown = false;
+    m_durationMs = 0;
+    m_sourceWidth = 0;
+    m_sourceHeight = 0;
+    m_stderrTail.clear();
+}
+
 void Backend::inspect(const QString &path) {
     m_sourcePath = path;
     m_plan = {};
@@ -297,8 +418,11 @@ void Backend::inspect(const QString &path) {
     m_partialPath.clear();
     m_remuxTempPath.clear();
     m_progress = 0;
+    m_stdoutBuffer.clear();
+    clearCropState();
     emit progressChanged();
     setStage(Stage::Inspecting);
+    m_inspectTimeout.setInterval(m_inspectTimeoutMs);
     m_inspectTimeout.start();
     m_process.start(m_mkvmerge, {"-J", m_sourcePath});
 }
@@ -361,24 +485,80 @@ void Backend::pumpScanPool() {
 void Backend::probeFinished(QProcess *process) {
     if (!m_scanProbeFile.contains(process))
         return;
+    const QString file = m_scanProbeFile.value(process);
+    if (!m_scanning) {  // cancelled while this probe was in flight
+        m_scanProbeFile.remove(process);
+        m_scanProbeStarted.remove(process);
+        m_scanCropping.remove(process);
+        return;
+    }
+
+    // Phase two: ffmpeg has finished the cropdetect probe for this file.
+    if (m_scanCropping.contains(process)) {
+        m_scanCropping.remove(process);
+        const bool ok = process->exitCode() == 0 && process->exitStatus() == QProcess::NormalExit;
+        MkvCrop crop;
+        if (ok)
+            crop = Mkv::parseCrop(QString::fromLocal8Bit(process->readAllStandardError()),
+                                  m_scanSourceWidth.value(file), m_scanSourceHeight.value(file));
+        // Insert even when there are no bars: the entry's presence is what
+        // tells the queue the file has already been probed.
+        m_scanCrops.insert(file, crop);
+        retireScanProbe(process);
+        return;
+    }
+
+    // Phase one: mkvmerge identified the file. Note whether it needs the
+    // usual track work, then look for bars before accepting it.
+    const bool ok = process->exitCode() == 0 && process->exitStatus() == QProcess::NormalExit;
+    qint64 duration = 0;
+    int width = 0, height = 0;
+    if (ok) {
+        const auto json = QJsonDocument::fromJson(process->readAllStandardOutput());
+        const auto tracks = Mkv::parseTracks(json);
+        const auto plan = Mkv::makePlan(tracks, subtitleLanguage(), audioLanguage());
+        m_scanTrackLists.insert(file, planTracks(plan));
+        m_scanNeedsWork.insert(
+            file, plan.removedCount() > 0 || !plan.extractSubtitleIds.isEmpty());
+        for (const auto &track : tracks) {
+            if (track.type == "video" && track.width > 0 && track.height > 0) {
+                width = track.width;
+                height = track.height;
+                break;
+            }
+        }
+        duration = Mkv::durationMs(json);
+        m_scanSourceWidth.insert(file, width);
+        m_scanSourceHeight.insert(file, height);
+
+        if (ffmpegAvailable()) {
+            m_scanCropping.insert(process);
+            m_scanProbeStarted[process] = QDateTime::currentDateTime();
+            process->start(m_ffmpeg, Mkv::cropDetectArguments(file, duration));
+            return;
+        }
+    }
+    // Without ffmpeg there is no bar probe; the crop is known to be empty.
+    if (ok)
+        m_scanCrops.insert(file, MkvCrop{});
+    retireScanProbe(process);
+}
+
+void Backend::retireScanProbe(QProcess *process) {
     const QString file = m_scanProbeFile.take(process);
     m_scanProbeStarted.remove(process);
-    if (!m_scanning)  // cancelled while this probe was in flight
+    if (!m_scanning)
         return;
 
     ++m_scanDone;
     m_progress = m_scanDone * 100 / m_scanList.size();
     emit progressChanged();
 
-    // A probe that read clean JSON keeps the file only if it would change.
-    if (process->exitCode() == 0 && process->exitStatus() == QProcess::NormalExit) {
-        const auto plan = Mkv::makePlan(Mkv::parseTracks(QJsonDocument::fromJson(process->readAllStandardOutput())),
-                                        subtitleLanguage(), audioLanguage());
-        if (plan.removedCount() > 0 || !plan.extractSubtitleIds.isEmpty()) {
-            m_scanAccepted.append(file);
-            m_scanTrackLists.insert(file, planTracks(plan));
-        }
-    }
+    // Accepted when there are tracks/subtitles to strip, or black bars to
+    // remove — a bar-only file still gets a review row and a tick box.
+    if (!file.isEmpty()
+        && (m_scanNeedsWork.value(file) || m_scanCrops.value(file).hasBars()))
+        m_scanAccepted.append(file);
     pumpScanPool();
 }
 
@@ -390,21 +570,35 @@ void Backend::finishScan() {
     m_scanPool.clear();
     m_scanProbeFile.clear();
     m_scanProbeStarted.clear();
+    m_scanCropping.clear();
     m_scanning = false;
     if (m_scanAccepted.isEmpty()) {
         m_scanFoundNothing = true;
+        m_scanTrackLists.clear();
+        m_scanCrops.clear();
+        m_scanNeedsWork.clear();
+        m_scanSourceWidth.clear();
+        m_scanSourceHeight.clear();
         setStage(Stage::Done);
         return;
     }
     setStage(Stage::Idle);
     // A single dirty file cleans straight away too; pausing for a review
     // after an explicit scan would be odd.
-    if (m_scanAccepted.size() == 1)
-        m_autoCleanOnce = true;
-    // Accepted files are in probe-completion order; present them sorted.
     Mkv::sortNaturally(m_scanAccepted);
-    initQueue(m_scanAccepted, m_scanTrackLists);
+    if (m_scanAccepted.size() == 1) {
+        const QString &only = m_scanAccepted.first();
+        const bool barsTicked = m_scanCrops.value(only).hasBars() && removeBarsDefault();
+        if (m_scanNeedsWork.value(only) || barsTicked)
+            m_autoCleanOnce = true;
+    }
+    // Accepted files are in probe-completion order; present them sorted.
+    initQueue(m_scanAccepted, m_scanTrackLists, m_scanCrops, m_scanNeedsWork);
     m_scanTrackLists.clear();
+    m_scanCrops.clear();
+    m_scanNeedsWork.clear();
+    m_scanSourceWidth.clear();
+    m_scanSourceHeight.clear();
     if (m_reviewAfterScan) {
         // Let the user trim the list — dual-audio anomalies and all — before
         // anything is processed.
@@ -417,6 +611,18 @@ void Backend::finishScan() {
 void Backend::startBatch() {
     if (m_stage != Stage::Review || m_queuePaths.isEmpty())
         return;
+    // A bar-only file the user left unticked has nothing else to do; drop it
+    // rather than rewriting it unchanged.
+    for (int i = m_queuePaths.size() - 1; i >= 0; --i) {
+        const bool bars = m_queueCrops.value(i).hasBars() && m_queueRemoveBars.value(i);
+        if (!m_queueNeedsWork.value(i, true) && !bars)
+            removeQueueRow(i);
+    }
+    if (m_queuePaths.isEmpty()) {
+        setStage(Stage::Idle);
+        return;
+    }
+    m_queueIndex = -1;
     // Trimmed down to one file? Clean it straight away, no second review.
     if (m_queuePaths.size() == 1)
         m_autoCleanOnce = true;
@@ -448,6 +654,11 @@ void Backend::removeQueueRow(int index) {
     m_queueExtracted.removeAt(index);
     m_queueKeptAudioIds.removeAt(index);
     m_queueTracks.removeAt(index);
+    m_queueCrops.removeAt(index);
+    m_queueCropKnown.removeAt(index);
+    m_queueRemoveBars.removeAt(index);
+    m_queueNeedsWork.removeAt(index);
+    m_queueCropped.removeAt(index);
     if (index < m_queueIndex)
         --m_queueIndex;
 }
@@ -458,12 +669,28 @@ void Backend::clean() {
     m_progress = 0;
     emit progressChanged();
     m_toolError.clear();
+    // Nothing to strip and no crop wanted: leave the original exactly as it
+    // is instead of rewriting an identical file.
+    if (m_plan.extractSubtitleIds.isEmpty() && m_plan.removedCount() == 0
+        && !cropSelected(m_queueIndex)) {
+        m_queueStates[m_queueIndex] = "done";
+        m_progress = 100;
+        emit progressChanged();
+        if (batch()) {
+            advance();
+            return;
+        }
+        setStage(Stage::Done);
+        return;
+    }
     startExtraction();
 }
 
 void Backend::startExtraction() {
     if (m_plan.extractSubtitleIds.isEmpty()) {
-        startRemux();
+        // No subtitle work: go straight to the crop decision (which may still
+        // remux when no bars are wanted).
+        startBars();
         return;
     }
     // Plain, SDH, and forced tracks each number within their own class, so
@@ -522,15 +749,53 @@ bool Backend::convertSdhSubtitle(MkvExtractJob &job) {
     return true;
 }
 
-void Backend::startRemux() {
-    // The cleaned file replaces the original in place. mkvmerge writes to a
-    // private temporary name — never "*.remux" — so the watcher's sweep can
-    // only ever find a fully written file: naming the in-progress output
-    // ".remux" let a sweep swap a half-written file into place, after which
-    // the finishing job unlinked it and the remux was gone too (both files
-    // lost). Once mkvmerge exits cleanly the temp becomes the verified
-    // "<source>.remux" and is swapped in atomically; a failed or cancelled
-    // run only ever removes its own temp.
+// Decide whether the current file needs a video re-encode to lose its bars.
+// The crop may already be known from a scan; otherwise ffmpeg probes it now
+// (after the subtitles are out, so an unreadable video fails the same way
+// regardless of the crop setting).
+void Backend::startBars() {
+    const bool wanted = cropSelected(m_queueIndex);
+    if (wanted && !m_cropKnown) {
+        if (!ffmpegAvailable()) {
+            recordQueueError(tr("ffmpeg is required to remove black bars."));
+            return;
+        }
+        setStage(Stage::Cropping);
+        m_stdoutBuffer.clear();
+        m_stderrTail.clear();
+        m_inspectTimeout.setInterval(m_cropTimeoutMs);
+        m_inspectTimeout.start();
+        m_process.start(m_ffmpeg, Mkv::cropDetectArguments(m_sourcePath, m_durationMs));
+        return;
+    }
+    if (wanted && m_crop.hasBars()) {
+        startVideoEncode();
+        return;
+    }
+    // The probe found no bars and there is nothing else to strip: do not
+    // rewrite an identical file.
+    if (m_plan.extractSubtitleIds.isEmpty() && m_plan.removedCount() == 0) {
+        m_queueStates[m_queueIndex] = "done";
+        m_progress = 100;
+        emit progressChanged();
+        if (batch()) {
+            advance();
+            return;
+        }
+        setStage(Stage::Done);
+        return;
+    }
+    startRemux();
+}
+
+// The cleaned file replaces the original in place. The tool writes to a
+// private temporary name — never "*.remux" — so the watcher's sweep can only
+// ever find a fully written file: naming the in-progress output ".remux" let
+// a sweep swap a half-written file into place, after which the finishing job
+// unlinked it and the remux was gone too (both files lost). Once the tool
+// exits cleanly the temp becomes the verified "<source>.remux" and is swapped
+// in atomically; a failed or cancelled run only ever removes its own temp.
+void Backend::prepareTempOutput() {
     m_outputPath = m_sourcePath;
     m_partialPath = m_sourcePath + QStringLiteral(".remux");
     m_remuxTempPath = m_sourcePath + QStringLiteral(".mkvclean-%1.tmp")
@@ -552,7 +817,25 @@ void Backend::startRemux() {
             QFile::remove(stale.absoluteFilePath());
     }
     QFile::remove(m_remuxTempPath);
+}
+
+void Backend::startVideoEncode() {
+    if (!ffmpegAvailable()) {
+        recordQueueError(tr("ffmpeg is required to remove black bars."));
+        return;
+    }
+    prepareTempOutput();
+    setStage(Stage::Encoding);
+    m_stdoutBuffer.clear();
+    m_stderrTail.clear();
+    m_process.start(m_ffmpeg, Mkv::encodeArguments(m_sourcePath, m_remuxTempPath, m_plan, m_crop));
+}
+
+void Backend::startRemux() {
+    prepareTempOutput();
     setStage(Stage::Remuxing);
+    m_stdoutBuffer.clear();
+    m_stderrTail.clear();
     m_process.start(m_mkvmerge, Mkv::remuxArguments(m_sourcePath, m_remuxTempPath, m_plan));
 }
 
@@ -569,14 +852,21 @@ void Backend::cancel() {
         m_scanPool.clear();
         m_scanProbeFile.clear();
         m_scanProbeStarted.clear();
+        m_scanCropping.clear();
         m_scanList.clear();
         m_scanAccepted.clear();
+        m_scanTrackLists.clear();
+        m_scanCrops.clear();
+        m_scanNeedsWork.clear();
+        m_scanSourceWidth.clear();
+        m_scanSourceHeight.clear();
         m_progress = 0;
         emit progressChanged();
         setStage(Stage::Idle);
         return;
     }
-    if (m_stage != Stage::Extracting && m_stage != Stage::Remuxing)
+    if (m_stage != Stage::Extracting && m_stage != Stage::Cropping && m_stage != Stage::Encoding
+        && m_stage != Stage::Remuxing)
         return;
     m_cancelling = true;
     m_process.kill();
@@ -599,6 +889,12 @@ void Backend::reset() {
     m_queueErrors.clear();
     m_queueExtracted.clear();
     m_queueKeptAudioIds.clear();
+    m_queueTracks.clear();
+    m_queueCrops.clear();
+    m_queueCropKnown.clear();
+    m_queueRemoveBars.clear();
+    m_queueNeedsWork.clear();
+    m_queueCropped.clear();
     m_queueIndex = -1;
     m_batchAborted = false;
     m_scanning = false;
@@ -607,6 +903,14 @@ void Backend::reset() {
     m_scanList.clear();
     m_scanAccepted.clear();
     m_scanIndex = -1;
+    m_scanTrackLists.clear();
+    m_scanCrops.clear();
+    m_scanNeedsWork.clear();
+    m_scanSourceWidth.clear();
+    m_scanSourceHeight.clear();
+    m_scanCropping.clear();
+    m_stdoutBuffer.clear();
+    clearCropState();
     m_progress = 0;
     emit progressChanged();
     setStage(Stage::Idle);
@@ -632,6 +936,10 @@ void Backend::recordQueueError(const QString &message) {
 
 void Backend::processFinished(int code, QProcess::ExitStatus status) {
     m_inspectTimeout.stop();
+    // Drain anything the readyRead slots have not seen yet: the last
+    // cropdetect line (or mkvmerge progress/error) can arrive with the exit.
+    readStderr();
+    parseToolOutput();
 
     if (m_cancelling) {
         m_cancelling = false;
@@ -658,11 +966,27 @@ void Backend::processFinished(int code, QProcess::ExitStatus status) {
             recordQueueError(tr("This file could not be read."));
             return;
         }
-        m_plan = Mkv::makePlan(Mkv::parseTracks(QJsonDocument::fromJson(output)),
-                               subtitleLanguage(), audioLanguage());
+        const auto json = QJsonDocument::fromJson(output);
+        const auto trackList = Mkv::parseTracks(json);
+        m_plan = Mkv::makePlan(trackList, subtitleLanguage(), audioLanguage());
         if (m_plan.tracks.isEmpty()) {
             recordQueueError(tr("This file could not be read."));
             return;
+        }
+        for (const auto &track : trackList) {
+            if (track.type == "video" && track.width > 0 && track.height > 0) {
+                m_sourceWidth = track.width;
+                m_sourceHeight = track.height;
+                break;
+            }
+        }
+        m_durationMs = Mkv::durationMs(json);
+        // A scan already probed this file; reuse the answer instead of
+        // running cropdetect on it a second time.
+        if (m_queueIndex >= 0 && m_queueIndex < m_queueCropKnown.size()
+            && m_queueCropKnown.at(m_queueIndex)) {
+            m_crop = m_queueCrops.value(m_queueIndex);
+            m_cropKnown = true;
         }
         if (batch() || m_autoCleanOnce) {
             // No review step in a batch: straight to the work.
@@ -690,64 +1014,153 @@ void Backend::processFinished(int code, QProcess::ExitStatus status) {
         if (batch())
             m_queueExtracted[m_queueIndex] = m_extractedFiles;
         m_extractJobs.clear();
-        startRemux();
+        startBars();
         return;
-    case Stage::Remuxing: {
+    case Stage::Cropping: {
+        MkvCrop crop;
+        if (!failed)
+            crop = Mkv::parseCrop(QString::fromLocal8Bit(m_stderrTail), m_sourceWidth,
+                                  m_sourceHeight);
+        m_crop = crop;
+        m_cropKnown = true;
+        if (m_queueIndex >= 0 && m_queueIndex < m_queueCrops.size()) {
+            m_queueCrops[m_queueIndex] = crop;
+            m_queueCropKnown[m_queueIndex] = true;
+        }
+        // If the probe itself failed and bars were the only reason to touch
+        // the file, say so rather than reporting a clean that did nothing.
+        if (failed && cropSelected(m_queueIndex) && m_plan.extractSubtitleIds.isEmpty()
+            && m_plan.removedCount() == 0) {
+            recordQueueError(tr("Black-bar detection failed."));
+            return;
+        }
+        startBars();
+        return;
+    }
+    case Stage::Encoding:
+        if (failed) {
+            QFile::remove(m_remuxTempPath);
+            QString detail = m_toolError;
+            if (detail.isEmpty()) {
+                // ffmpeg reports encode errors on stderr, not as #GUI# lines.
+                const QStringList lines =
+                    QString::fromLocal8Bit(m_stderrTail).split('\n', Qt::SkipEmptyParts);
+                for (auto it = lines.crbegin(); it != lines.crend(); ++it) {
+                    if (!it->trimmed().isEmpty()) {
+                        detail = it->trimmed();
+                        break;
+                    }
+                }
+            }
+            recordQueueError(detail.isEmpty() ? tr("Re-encoding the video failed.") : detail);
+            return;
+        }
+        finishOutput(true);
+        return;
+    case Stage::Remuxing:
         if (failed) {
             QFile::remove(m_remuxTempPath);
             recordQueueError(m_toolError.isEmpty() ? tr("Remuxing failed.") : m_toolError);
             return;
         }
-        // mkvmerge finished writing the temp file, so it is a verified
-        // cleaned copy. Swap it straight into place with one atomic rename.
-        // If that is refused (permissions, a read-only mount), the original
-        // is untouched: keep the verified output alongside it as
-        // "<source>.remux" for a later pass instead of losing it.
-        QString swapError;
-        if (!Mkv::replaceOriginal(m_sourcePath, m_remuxTempPath, &swapError)) {
-            QFile::remove(m_partialPath);
-            if (!QFile::rename(m_remuxTempPath, m_partialPath)) {
-                QFile::remove(m_remuxTempPath);
-                recordQueueError(tr("The cleaned file could not be prepared."));
-                return;
-            }
-            recordQueueError(tr("The cleaned file could not be moved into place; it was left as %1.")
-                                 .arg(m_partialPath));
-            return;
-        }
-        m_queueStates[m_queueIndex] = "done";
-        m_queueKeptAudioIds[m_queueIndex] = m_plan.keepAudioId;
-        m_progress = 100;
-        emit progressChanged();
-        if (batch()) {
-            advance();
-            return;
-        }
-        setStage(Stage::Done);
+        finishOutput(false);
         return;
-    }
     default:
         return;
     }
 }
 
-void Backend::parseRemuxOutput() {
-    if (m_stage != Stage::Remuxing)
+void Backend::finishOutput(bool wasCropped) {
+    // The tool finished writing the temp file, so it is a verified cleaned
+    // copy. Swap it straight into place with one atomic rename. If that is
+    // refused (permissions, a read-only mount), the original is untouched:
+    // keep the verified output alongside it as "<source>.remux" for a later
+    // pass instead of losing it.
+    QString swapError;
+    if (!Mkv::replaceOriginal(m_sourcePath, m_remuxTempPath, &swapError)) {
+        QFile::remove(m_partialPath);
+        if (!QFile::rename(m_remuxTempPath, m_partialPath)) {
+            QFile::remove(m_remuxTempPath);
+            recordQueueError(tr("The cleaned file could not be prepared."));
+            return;
+        }
+        recordQueueError(tr("The cleaned file could not be moved into place; it was left as %1.")
+                             .arg(m_partialPath));
         return;
-    static const QRegularExpression progressExpression("#GUI#progress\\s+(\\d+)%");
-    static const QRegularExpression errorExpression("#GUI#error\\s+(.*)");
-    const QString output = QString::fromLocal8Bit(m_process.readAllStandardOutput());
-    for (const auto &line : output.split('\n')) {
-        const auto progressMatch = progressExpression.match(line);
-        if (progressMatch.hasMatch()) {
-            const int value = progressMatch.captured(1).toInt();
-            if (value != m_progress) {
-                m_progress = value;
+    }
+    m_queueStates[m_queueIndex] = "done";
+    m_queueKeptAudioIds[m_queueIndex] = m_plan.keepAudioId;
+    if (m_queueIndex >= 0 && m_queueIndex < m_queueCropped.size())
+        m_queueCropped[m_queueIndex] = wasCropped;
+    m_progress = 100;
+    emit progressChanged();
+    if (batch()) {
+        advance();
+        return;
+    }
+    setStage(Stage::Done);
+}
+
+void Backend::readStderr() {
+    const QByteArray data = m_process.readAllStandardError();
+    if (data.isEmpty())
+        return;
+    m_stderrTail.append(data);
+    // cropdetect logs one line per sampled frame; keep only a bounded tail so
+    // a long file cannot grow memory without limit.
+    constexpr int limit = 262144;
+    if (m_stderrTail.size() > limit)
+        m_stderrTail = m_stderrTail.right(limit / 2);
+}
+
+void Backend::parseToolOutput() {
+    if (m_stage != Stage::Remuxing && m_stage != Stage::Encoding)
+        return;
+    m_stdoutBuffer.append(m_process.readAllStandardOutput());
+    int newline = -1;
+    while ((newline = m_stdoutBuffer.indexOf('\n')) >= 0) {
+        const QString line = QString::fromLocal8Bit(m_stdoutBuffer.left(newline)).trimmed();
+        m_stdoutBuffer.remove(0, newline + 1);
+        if (line.isEmpty())
+            continue;
+
+        if (m_stage == Stage::Remuxing) {
+            static const QRegularExpression progressExpression("#GUI#progress\\s+(\\d+)%");
+            static const QRegularExpression errorExpression("#GUI#error\\s+(.*)");
+            const auto progressMatch = progressExpression.match(line);
+            if (progressMatch.hasMatch()) {
+                const int value = progressMatch.captured(1).toInt();
+                if (value != m_progress) {
+                    m_progress = value;
+                    emit progressChanged();
+                }
+            }
+            const auto errorMatch = errorExpression.match(line);
+            if (errorMatch.hasMatch())
+                m_toolError = errorMatch.captured(1).trimmed();
+            continue;
+        }
+
+        // ffmpeg's -progress output: out_time_us is microseconds written.
+        if (line.startsWith(QStringLiteral("out_time_us="))
+            || line.startsWith(QStringLiteral("out_time_ms="))) {
+            const qint64 micros = line.mid(12).toLongLong();
+            if (m_durationMs > 0 && micros >= 0) {
+                const int value =
+                    qBound(0, static_cast<int>(micros / 1000 * 100 / m_durationMs), 99);
+                if (value != m_progress) {
+                    m_progress = value;
+                    emit progressChanged();
+                }
+            }
+        } else if (line == QStringLiteral("progress=end")) {
+            if (m_progress != 100) {
+                m_progress = 100;
                 emit progressChanged();
             }
         }
-        const auto errorMatch = errorExpression.match(line);
-        if (errorMatch.hasMatch())
-            m_toolError = errorMatch.captured(1).trimmed();
     }
+    // Never let a stream without newlines grow without bound.
+    if (m_stdoutBuffer.size() > 65536)
+        m_stdoutBuffer.clear();
 }

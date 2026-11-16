@@ -95,9 +95,16 @@ void AppSettings::setConvertSdh(bool enabled) {
     save();
 }
 
+void AppSettings::setRemoveBars(bool enabled) {
+    if (enabled == m_removeBars)
+        return;
+    m_removeBars = enabled;
+    save();
+}
+
 void AppSettings::load(const QString &legacyPath) {
     if (readConfig(&m_watchFolders, &m_excludedFolders, &m_audioLanguage, &m_subtitleLanguage,
-                   &m_convertSdh))
+                   &m_convertSdh, &m_removeBars))
         return;
 
     // First run after the settings panel existed: adopt the folder list the
@@ -115,7 +122,8 @@ void AppSettings::load(const QString &legacyPath) {
 }
 
 bool AppSettings::readConfig(QStringList *watchFolders, QStringList *excludedFolders,
-                             QString *audioLanguage, QString *subtitleLanguage, bool *convertSdh) {
+                             QString *audioLanguage, QString *subtitleLanguage, bool *convertSdh,
+                             bool *removeBars) {
     QFile file(m_path);
     if (!file.open(QIODevice::ReadOnly))
         return false;
@@ -138,6 +146,7 @@ bool AppSettings::readConfig(QStringList *watchFolders, QStringList *excludedFol
     if (!subtitle.isEmpty())
         *subtitleLanguage = subtitle;
     *convertSdh = object.value("convertSdh").toBool(false);
+    *removeBars = object.value("removeBars").toBool(false);
     return true;
 }
 
@@ -152,12 +161,12 @@ void AppSettings::watchConfigDirectory() {
 void AppSettings::reload() {
     QStringList watchFolders, excludedFolders;
     QString audio = m_audioLanguage, subtitle = m_subtitleLanguage;
-    bool convertSdh = m_convertSdh;
-    if (!readConfig(&watchFolders, &excludedFolders, &audio, &subtitle, &convertSdh))
+    bool convertSdh = m_convertSdh, removeBars = m_removeBars;
+    if (!readConfig(&watchFolders, &excludedFolders, &audio, &subtitle, &convertSdh, &removeBars))
         return;
     if (watchFolders == m_watchFolders && excludedFolders == m_excludedFolders
         && audio == m_audioLanguage && subtitle == m_subtitleLanguage
-        && convertSdh == m_convertSdh)
+        && convertSdh == m_convertSdh && removeBars == m_removeBars)
         return;
 
     m_watchFolders = watchFolders;
@@ -165,6 +174,7 @@ void AppSettings::reload() {
     m_audioLanguage = audio;
     m_subtitleLanguage = subtitle;
     m_convertSdh = convertSdh;
+    m_removeBars = removeBars;
     emit changed();
 }
 
@@ -179,6 +189,7 @@ bool AppSettings::save() {
         {"audioLanguage", m_audioLanguage},
         {"subtitleLanguage", m_subtitleLanguage},
         {"convertSdh", m_convertSdh},
+        {"removeBars", m_removeBars},
     };
     file.write(QJsonDocument(object).toJson(QJsonDocument::Compact));
     if (!file.commit())

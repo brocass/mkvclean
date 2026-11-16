@@ -91,5 +91,28 @@
   },
   "Discard": "Descartar",
   "Convert SDH subtitles to standard": "Converter legendas SDH em padrão",
-  "Removes sound descriptions like [DOOR CLOSES] or (sighs), and speaker labels. The SDH-only subtitle file is replaced.": "Remove descrições sonoras como [PORTA FECHA] ou (suspiro), e rótulos de falantes. O arquivo de legenda apenas SDH é substituído."
+  "Removes sound descriptions like [DOOR CLOSES] or (sighs), and speaker labels. The SDH-only subtitle file is replaced.": "Remove descrições sonoras como [PORTA FECHA] ou (suspiro), e rótulos de falantes. O arquivo de legenda apenas SDH é substituído.",
+  "Remove black bars": "Remover faixas pretas",
+  "Re-encodes the video with the “1080p x265 Slow and Low” preset. Much slower than a remux.": "Recodifica o vídeo com a predefinição “1080p x265 Slow and Low”. Muito mais lento que um remux.",
+  "ffmpeg is not installed, so black bars cannot be removed.": "O ffmpeg não está instalado, então as faixas pretas não podem ser removidas.",
+  "%n file has black bars — tick to remove them.": {
+    "one": "%n arquivo tem faixas pretas — marque para removê-las.",
+    "other": "%n arquivos têm faixas pretas — marque para removê-las."
+  },
+  "Black bars": "Faixas pretas",
+  "Cropped size: %1×%2": "Tamanho cortado: %1×%2",
+  "Select bars": "Selecionar faixas",
+  "Clear bars": "Limpar faixas",
+  "bars removed": "faixas removidas",
+  "bars": "faixas",
+  "Black bars removed.": "Faixas pretas removidas.",
+  "Re-encodes video with the “1080p x265 Slow and Low” preset. Watched and scanned files with bars are processed automatically.": "Recodifica o vídeo com a predefinição “1080p x265 Slow and Low”. Arquivos monitorados e verificados com faixas são processados automaticamente.",
+  "ffmpeg is not installed, so this option has no effect.": "O ffmpeg não está instalado, então esta opção não tem efeito.",
+  "Looking for black bars…": "Procurando faixas pretas…",
+  "Removing black bars…": "Removendo faixas pretas…",
+  "ffmpeg is required to remove black bars.": "O ffmpeg é necessário para remover faixas pretas.",
+  "Black-bar detection failed.": "Falha na detecção de faixas pretas.",
+  "Re-encoding the video failed.": "Falha ao recodificar o vídeo.",
+  "The cleaned file could not be prepared.": "O arquivo limpo não pôde ser preparado.",
+  "The cleaned file could not be moved into place; it was left as %1.": "O arquivo limpo não pôde ser movido para o lugar; ele foi deixado como %1."
 }
