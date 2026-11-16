@@ -109,7 +109,7 @@ ApplicationWindow {
                     const paths = []
                     for (const url of drop.urls)
                         paths.push(url.toString())
-                    backend.openPaths(paths)
+                    backend.openPaths(paths, true)
                 }
             }
 
@@ -482,6 +482,13 @@ ApplicationWindow {
                                                 font.pixelSize: 12
                                                 color: "#d8a050"
                                             }
+                                            Label {
+                                                Layout.fillWidth: true
+                                                visible: !modelData.bars
+                                                text: qsTr("No black bars detected")
+                                                font.pixelSize: 12
+                                                color: "#7a7a84"
+                                            }
 
                                             Repeater {
                                                 model: modelData.tracks
@@ -542,7 +549,7 @@ ApplicationWindow {
                             }
                             Item { Layout.fillWidth: true }
                             Button {
-                                text: qsTr("Clean %n files", "", backend.queueCount)
+                                text: qsTr("Extract and clean")
                                 Material.background: theme.accent
                                 Material.foreground: theme.accentForeground
                                 Material.roundedScale: theme.radius

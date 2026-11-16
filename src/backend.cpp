@@ -65,7 +65,7 @@ Backend::Backend(FilePicker *picker, QObject *parent, const QString &mkvmerge, c
                     }
                 return;
             }
-            openPaths(paths);
+            openPaths(paths, true);
         });
         connect(m_picker, &FilePicker::failed, this,
                 [this](const QString &message) { failWith(message); });
@@ -342,11 +342,11 @@ void Backend::refreshServiceStatus() {
     m_serviceProcess.start("systemctl", {"--user", "is-active", "mkvclean"});
 }
 
-void Backend::openPath(const QString &path) {
-    openPaths({path});
+void Backend::openPath(const QString &path, bool review) {
+    openPaths({path}, review);
 }
 
-void Backend::openPaths(const QStringList &paths) {
+void Backend::openPaths(const QStringList &paths, bool review) {
     if (busy() || !toolsAvailable() || paths.isEmpty())
         return;
 
@@ -366,6 +366,16 @@ void Backend::openPaths(const QStringList &paths) {
         return;
     }
 
+    if (review) {
+        // A manual open pauses at the review list: every file with its
+        // tracks, subtitle plan and black-bar status, a tick box apiece,
+        // and nothing processed until "Extract and clean". Probing first
+        // also fills in the dropdowns before the list is shown.
+        m_reviewAfterScan = true;
+        probeFiles(files);
+        return;
+    }
+    // Watched arrivals and the CLI keep going without a pause.
     initQueue(files);
     advance();
 }
@@ -467,6 +477,10 @@ void Backend::scanFolderList(const QStringList &folders, const QStringList &excl
         setStage(Stage::Done);
         return;
     }
+    probeFiles(files);
+}
+
+void Backend::probeFiles(const QStringList &files) {
     reset();  // start from a clean queue
     m_scanning = true;
     m_scanFoundNothing = false;

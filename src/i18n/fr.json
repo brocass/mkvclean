@@ -117,6 +117,6 @@
   "The cleaned file could not be moved into place; it was left as %1.": "Le fichier nettoyé n'a pas pu être déplacé en place ; il a été laissé sous %1.",
   "Black-bar cleaning runs on these folders; new files get the re-encode.": "Le nettoyage des bandes noires s'applique à ces dossiers ; les nouveaux fichiers sont re-encodés.",
   "Black bars excluded": "Bandes noires exclues",
-  "Folders inside these are never watched for black bars.": "Les dossiers à l'intérieur de ces dossiers ne sont jamais surveillés pour des bandes noires."
+  "Folders inside these are never watched for black bars.": "Les dossiers à l'intérieur de ces dossiers ne sont jamais surveillés pour des bandes noires.",
+  "No black bars detected": "Aucune bande noire détectée"
 }
-

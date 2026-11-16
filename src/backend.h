@@ -93,8 +93,11 @@ public:
 
     Q_INVOKABLE void openFiles();
     Q_INVOKABLE void openFolder();
-    Q_INVOKABLE void openPath(const QString &path);
-    Q_INVOKABLE void openPaths(const QStringList &paths);
+    // Manual opens (picker, drag-and-drop, a file handed to the GUI) pass
+    // review=true so nothing processes until "Extract and clean"; the watch
+    // service and the CLI keep the default and clean straight through.
+    Q_INVOKABLE void openPath(const QString &path, bool review = false);
+    Q_INVOKABLE void openPaths(const QStringList &paths, bool review = false);
     Q_INVOKABLE void scanFolders(const QStringList &folders);
     Q_INVOKABLE void scanBlackBarFolders();
     Q_INVOKABLE void startBatch();
@@ -146,6 +149,9 @@ private:
     void probeFinished(QProcess *process);
     void retireScanProbe(QProcess *process);
     void finishScan();
+    // Shared probe pool: scans and manual opens both identify tracks and
+    // black bars for every file before the list is shown.
+    void probeFiles(const QStringList &files);
     void scanFolderList(const QStringList &folders, const QStringList &excluded);
     QString subtitleLanguage() const;
     QString audioLanguage() const;

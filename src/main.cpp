@@ -85,7 +85,8 @@ int main(int argc, char *argv[]) {
     if (engine.rootObjects().isEmpty())
         return 1;
 
-    // `mkvclean [open] <file.mkv>` opens straight into the file.
+    // `mkvclean [open] <file.mkv>` opens straight into the file, paused at
+    // the review list like any other manual open.
     QString file;
     for (int i = 1; i < arguments.size(); ++i) {
         const QString &argument = arguments.at(i);
@@ -95,7 +96,7 @@ int main(int argc, char *argv[]) {
         break;
     }
     if (!file.isEmpty())
-        backend.openPath(QFileInfo(file).absoluteFilePath());
+        backend.openPath(QFileInfo(file).absoluteFilePath(), true);
 
     return app.exec();
 }

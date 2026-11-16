@@ -1327,6 +1327,84 @@ private slots:
         QCOMPARE(backend.state(), QString("idle"));
     }
 
+    void backendOpenFolderPausesAtReview()
+    {
+        const QString mkvmerge = QStandardPaths::findExecutable("mkvmerge");
+        const QString mkvextract = QStandardPaths::findExecutable("mkvextract");
+        const QString ffmpeg = QStandardPaths::findExecutable("ffmpeg");
+        if (mkvmerge.isEmpty() || mkvextract.isEmpty() || ffmpeg.isEmpty())
+            QSKIP("needs ffmpeg and MKVToolNix");
+
+        QTemporaryDir dir;
+        const QString first = makeSampleMkv(dir.path(), ffmpeg, mkvmerge, "a-first.mkv");
+        const QString second = makeSampleMkv(dir.path(), ffmpeg, mkvmerge, "b-second.mkv");
+        QVERIFY2(!first.isEmpty() && !second.isEmpty(), "could not build the sample MKVs");
+
+        Backend backend(nullptr, nullptr, mkvmerge, mkvextract);
+        // What Open folder does: a manual open must land at the review list,
+        // never auto-process, no matter how many files it queues up.
+        backend.openPaths({dir.path()}, true);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("review"), 60000);
+
+        QVERIFY(backend.batch());
+        QCOMPARE(backend.queueCount(), 2);
+        QCOMPARE(backend.barsDetectedCount(), 0);
+        // Both files wait untouched: still their original four tracks, and
+        // nothing has been extracted yet.
+        QCOMPARE(Mkv::parseTracks(inspect(mkvmerge, first)).size(), 4);
+        QCOMPARE(Mkv::parseTracks(inspect(mkvmerge, second)).size(), 4);
+        QVERIFY(!QFile::exists(dir.filePath("a-first.en.srt")));
+        QVERIFY(!QFile::exists(dir.filePath("b-second.en.srt")));
+
+        // Each review row carries the probed track plan for its dropdown:
+        // video and audio/subtitle tracks with a keep/extract/remove action.
+        const auto rows = backend.queue();
+        for (const auto &row : rows) {
+            const auto tracks = row.toMap().value("tracks").toList();
+            QVERIFY(!tracks.isEmpty());
+            bool sawVideo = false, sawPlanned = false;
+            for (const auto &track : tracks) {
+                const auto map = track.toMap();
+                sawVideo |= map.value("type").toString() == "video";
+                sawPlanned |= map.value("action").toString() == "extract"
+                              || map.value("action").toString() == "remove";
+            }
+            QVERIFY(sawVideo);
+            QVERIFY(sawPlanned);
+        }
+
+        // Nothing moves until the button's action runs.
+        backend.startBatch();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("done"), 60000);
+        QCOMPARE(backend.queueCleanedCount(), 2);
+        QVERIFY(QFile::exists(dir.filePath("a-first.en.srt")));
+        QVERIFY(QFile::exists(dir.filePath("b-second.en.srt")));
+    }
+
+    void backendOpenFilePausesAtReview()
+    {
+        const QString mkvmerge = QStandardPaths::findExecutable("mkvmerge");
+        const QString mkvextract = QStandardPaths::findExecutable("mkvextract");
+        const QString ffmpeg = QStandardPaths::findExecutable("ffmpeg");
+        if (mkvmerge.isEmpty() || mkvextract.isEmpty() || ffmpeg.isEmpty())
+            QSKIP("needs ffmpeg and MKVToolNix");
+
+        QTemporaryDir dir;
+        const QString sample = makeSampleMkv(dir.path(), ffmpeg, mkvmerge, "only.mkv");
+        QVERIFY2(!sample.isEmpty(), "could not build the sample MKV");
+
+        // What Open file does: the same review pause for a single file.
+        Backend backend(nullptr, nullptr, mkvmerge, mkvextract);
+        backend.openPath(sample, true);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("review"), 60000);
+        QCOMPARE(backend.queueCount(), 1);
+        QVERIFY(!QFile::exists(dir.filePath("only.en.srt")));
+
+        backend.startBatch();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("done"), 60000);
+        QVERIFY(QFile::exists(dir.filePath("only.en.srt")));
+    }
+
     void backendScansTheBlackBarFolders()
     {
         const QString mkvmerge = QStandardPaths::findExecutable("mkvmerge");

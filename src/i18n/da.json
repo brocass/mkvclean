@@ -117,6 +117,6 @@
   "The cleaned file could not be moved into place; it was left as %1.": "Den rensede fil kunne ikke flyttes på plads; den blev efterladt som %1.",
   "Black-bar cleaning runs on these folders; new files get the re-encode.": "Sorte bjælkerrensningen kører på disse mapper; nye filer får den igen kodet.",
   "Black bars excluded": "Sorte bjælker ekskluderet",
-  "Folders inside these are never watched for black bars.": "Mapperne her er aldrig undersøgt for sorte bjælker."
+  "Folders inside these are never watched for black bars.": "Mapperne her er aldrig undersøgt for sorte bjælker.",
+  "No black bars detected": "Ingen sorte bjælker fundet"
 }
-
