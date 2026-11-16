@@ -89,7 +89,7 @@ public:
     bool toolsAvailable() const;
     void setSettings(AppSettings *settings) { m_settings = settings; }
     // GUI mode: a completed scan pauses at a review list before processing.
-    void setReviewAfterScan(bool review) { m_reviewAfterScan = review; }
+    Q_INVOKABLE void setReviewAfterScan(bool review) { m_reviewAfterScan = review; }
 
     Q_INVOKABLE void openFiles();
     Q_INVOKABLE void openFolder();
