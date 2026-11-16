@@ -145,14 +145,11 @@ void AppSettings::load(const QString &legacyPath) {
         if (!m_watchFolders.isEmpty())
             save();
     }
-
-    // Black-bar cleaning gets its own lists; until they are set, fall back to
-    // the ordinary watch/exclude lists so an unconfigured install behaves as
-    // before.
-    if (m_blackBarWatchFolders.isEmpty() && !m_watchFolders.isEmpty())
+    if (m_blackBarWatchFolders.isEmpty() && !m_watchFolders.isEmpty()) {
         m_blackBarWatchFolders = m_watchFolders;
-    if (m_blackBarExcludedFolders.isEmpty() && !m_excludedFolders.isEmpty())
-        m_blackBarExcludedFolders = m_excludedFolders;
+        if (m_blackBarExcludedFolders.isEmpty() && !m_excludedFolders.isEmpty())
+            m_blackBarExcludedFolders = m_excludedFolders;
+    }
 }
 
 bool AppSettings::readConfig(QStringList *watchFolders, QStringList *excludedFolders,
@@ -182,6 +179,13 @@ bool AppSettings::readConfig(QStringList *watchFolders, QStringList *excludedFol
         *subtitleLanguage = subtitle;
     *convertSdh = object.value("convertSdh").toBool(false);
     *removeBars = object.value("removeBars").toBool(false);
+    // Migration: black-bar cleaning used to share the ordinary watch/exclude
+    // lists; adopt them when the keys are absent, so a pre-black-bar install
+    // keeps cleaning what it watched.
+    if (!object.contains("blackBarWatchFolders"))
+        *blackBarWatchFolders = *watchFolders;
+    if (!object.contains("blackBarExcludedFolders"))
+        *blackBarExcludedFolders = *excludedFolders;
     for (const auto &folder : object.value("blackBarWatchFolders").toArray())
         if (folder.isString())
             blackBarWatchFolders->append(folder.toString());

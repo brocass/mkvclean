@@ -30,8 +30,8 @@ MKVToolNix (`mkvmerge`, `mkvextract`).
   review and scan, and ticked to crop; the re-encode follows the HandBrake
   "1080p x265 Slow and Low" preset (10-bit HEVC, slow, CRF 21.5, variable
   frame rate, audio copied, chapters kept). Needs `ffmpeg`. Black-bar
-  cleaning runs on its own watched/excluded folder lists (falling back to
-  the ordinary ones until configured).
+  cleaning runs on its own watched/excluded folder lists (which adopt the
+  ordinary ones until configured).
 - **Emby-proof**: if the original is busy (a scan, credit detection, a
   player), the verified remux is left behind as `Movie.mkv.remux` and the
   watch service completes the swap automatically on a later pass.

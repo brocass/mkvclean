@@ -30,11 +30,12 @@ public:
 
     QStringList watchFolders() const { return m_watchFolders; }
     QStringList excludedFolders() const { return m_excludedFolders; }
-    // Black-bar removal runs on its own folder lists; when none are set the
+    // Black-bar removal runs on its own folder lists; until they are set the
     // ordinary watch/exclude lists are used, so an unconfigured install keeps
-    // cleaning the folders it already watches.
-    QStringList blackBarWatchFolders() const { return m_blackBarWatchFolders.isEmpty() ? m_watchFolders : m_blackBarWatchFolders; }
-    QStringList blackBarExcludedFolders() const { return m_blackBarExcludedFolders.isEmpty() ? m_excludedFolders : m_blackBarExcludedFolders; }
+    // cleaning the folders it already watches. Once the user manages the black
+    // bar lists, they stay theirs — removing the last entry leaves them empty.
+    QStringList blackBarWatchFolders() const { return m_blackBarWatchFolders; }
+    QStringList blackBarExcludedFolders() const { return m_blackBarExcludedFolders; }
     QString audioLanguage() const { return m_audioLanguage; }
     QString subtitleLanguage() const { return m_subtitleLanguage; }
     bool convertSdh() const { return m_convertSdh; }

@@ -31,8 +31,9 @@ recursively for `*.mkv`):
    on; `--no-remove-bars` forces the plain remux.
 
 Black-bar cleaning runs on its own watched/excluded folder lists in the
-settings and the watch service; until they are set, the ordinary watch and
-excluded folders are used.
+settings and the watch service; until they are configured (via the settings
+or a config file that lacks the black-bar keys) they adopt the ordinary
+watch and excluded folders. Once managed, they stay independent.
 
 A corrupt or unreadable file is reported as an error and left untouched; one
 bad file never stops the batch.

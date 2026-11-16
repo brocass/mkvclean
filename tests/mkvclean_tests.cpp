@@ -1,6 +1,8 @@
 #include <QDir>
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QProcess>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -1009,29 +1011,30 @@ private slots:
         QDir(dir.path()).mkpath("watched");
         const QString config = dir.filePath("config.json");
 
-        AppSettings settings(config, dir.filePath("no-legacy"));
-        // Until black-bar folders are configured, the ordinary watch list is
-        // the fallback.
-        QCOMPARE(settings.blackBarWatchFolders(), QStringList());
-        QCOMPARE(settings.blackBarExcludedFolders(), QStringList());
+        // Migration: a config without the black-bar keys adopts the ordinary
+        // watch list, so a pre-black-bar install keeps cleaning what it watched.
+        {
+            QFile file(config);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            const QJsonObject object{{"watchFolders", QJsonArray::fromStringList({dir.filePath("watched")})}};
+            file.write(QJsonDocument(object).toJson(QJsonDocument::Compact));
+        }
+        AppSettings adopted(config, dir.filePath("no-legacy"));
+        QCOMPARE(adopted.blackBarWatchFolders(), QStringList({dir.filePath("watched")}));
 
+        // Once the black-bar lists are managed they stay theirs: adding and
+        // removing on the black-bar list does not fall back to the ordinary
+        // one, and emptying them leaves them empty.
+        AppSettings settings(config, dir.filePath("no-legacy"));
         settings.addBlackBarWatchFolder(dir.filePath("watched"));
         QCOMPARE(settings.blackBarWatchFolders(), QStringList({dir.filePath("watched")}));
+        settings.removeBlackBarWatchFolder(dir.filePath("watched"));
+        QCOMPARE(settings.blackBarWatchFolders(), QStringList());
 
-        AppSettings reloaded(config, dir.filePath("no-legacy"));
-        QCOMPARE(reloaded.blackBarWatchFolders(), QStringList({dir.filePath("watched")}));
-
-        reloaded.removeBlackBarWatchFolder(dir.filePath("watched"));
-        QCOMPARE(reloaded.blackBarWatchFolders(), QStringList());
-
-        reloaded.addBlackBarExcludedFolder(dir.filePath("watched"));
-        QCOMPARE(reloaded.blackBarExcludedFolders(), QStringList({dir.filePath("watched")}));
-
-        AppSettings reloadedAgain(config, dir.filePath("no-legacy"));
-        QCOMPARE(reloadedAgain.blackBarExcludedFolders(), QStringList({dir.filePath("watched")}));
-
-        reloadedAgain.removeBlackBarExcludedFolder(dir.filePath("watched"));
-        QCOMPARE(reloadedAgain.blackBarExcludedFolders(), QStringList());
+        settings.addBlackBarExcludedFolder(dir.filePath("watched"));
+        QCOMPARE(settings.blackBarExcludedFolders(), QStringList({dir.filePath("watched")}));
+        settings.removeBlackBarExcludedFolder(dir.filePath("watched"));
+        QCOMPARE(settings.blackBarExcludedFolders(), QStringList());
     }
 
     void settingsFollowExternalChanges()

@@ -973,6 +973,7 @@ ApplicationWindow {
                                     enabled: !win.busy && settings.watchFolders.length > 0
                                     onClicked: {
                                         win.settingsVisible = false
+                                        backend.setReviewAfterScan(true)
                                         backend.scanFolders(settings.watchFolders)
                                     }
                                 }
@@ -1089,6 +1090,7 @@ ApplicationWindow {
                                     enabled: !win.busy && settings.blackBarWatchFolders.length > 0
                                     onClicked: {
                                         win.settingsVisible = false
+                                        backend.setReviewAfterScan(true)
                                         backend.scanBlackBarFolders()
                                     }
                                 }
