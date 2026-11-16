@@ -15,6 +15,17 @@ Watcher::Watcher(const QStringList &folders, int settleMs, QObject *parent,
       m_settleMs(settleMs),
       m_backend(nullptr, this, mkvmerge, mkvextract) {
     m_backend.setSettings(settings);
+    // Black-bar cleaning follows its own folder lists; fall back to the
+    // ordinary ones when they are unset, and watch/exclude the union so a
+    // bar folder is cleaned even when it is not a subtitle watch folder.
+    if (settings) {
+        for (const auto &folder : settings->blackBarWatchFolders())
+            if (!m_roots.contains(folder))
+                m_roots.append(folder);
+        for (const auto &folder : settings->blackBarExcludedFolders())
+            if (!m_excluded.contains(folder))
+                m_excluded.append(folder);
+    }
     m_stabilityTimer.setInterval(1000);
     connect(&m_stabilityTimer, &QTimer::timeout, this, &Watcher::checkCandidates);
     // Events can be missed on fused/network mounts; a slow poll makes the

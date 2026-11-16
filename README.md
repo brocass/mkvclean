@@ -29,7 +29,9 @@ MKVToolNix (`mkvmerge`, `mkvextract`).
 - **Optional black-bar removal**: letterboxed videos are detected during the
   review and scan, and ticked to crop; the re-encode follows the HandBrake
   "1080p x265 Slow and Low" preset (10-bit HEVC, slow, CRF 21.5, variable
-  frame rate, audio copied, chapters kept). Needs `ffmpeg`.
+  frame rate, audio copied, chapters kept). Needs `ffmpeg`. Black-bar
+  cleaning runs on its own watched/excluded folder lists (falling back to
+  the ordinary ones until configured).
 - **Emby-proof**: if the original is busy (a scan, credit detection, a
   player), the verified remux is left behind as `Movie.mkv.remux` and the
   watch service completes the swap automatically on a later pass.
@@ -38,10 +40,13 @@ MKVToolNix (`mkvmerge`, `mkvextract`).
   never stops the batch.
 - **Watch service**: a systemd user service cleans new arrivals in your
   watched folders once they finish copying, with excluded folders (a Music
-  Videos folder, say) and a manual **Scan now** for anything missed.
+  Videos folder, say) and a manual **Scan now** for anything missed. Black
+  bars get their own folder lists, so you can watch one folder for
+  letterboxing and another for subtitle cleaning.
 - **Settings panel** (`S`): watched folders, excluded folders, preferred
-  audio and subtitle languages (~50 languages), black-bar removal, and the
-  service toggle. Shared by the GUI, the CLI, and the service.
+  audio and subtitle languages (~50 languages), black-bar removal, the
+  black-bar watched/excluded folder lists, and the service toggle. Shared
+  by the GUI, the CLI, and the service.
 - **Headless CLI + agent skill**: `mkvclean clean` and `mkvclean watch …`
   with JSON output for scripts; `mkvclean skill install` teaches your agent.
 - **Omarchy-native**: follows the theme accent and window rounding live, and

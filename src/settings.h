@@ -13,6 +13,8 @@ class AppSettings : public QObject {
     Q_OBJECT
     Q_PROPERTY(QStringList watchFolders READ watchFolders NOTIFY changed)
     Q_PROPERTY(QStringList excludedFolders READ excludedFolders NOTIFY changed)
+    Q_PROPERTY(QStringList blackBarWatchFolders READ blackBarWatchFolders NOTIFY changed)
+    Q_PROPERTY(QStringList blackBarExcludedFolders READ blackBarExcludedFolders NOTIFY changed)
     Q_PROPERTY(QString audioLanguage READ audioLanguage NOTIFY changed)
     Q_PROPERTY(QString subtitleLanguage READ subtitleLanguage NOTIFY changed)
     Q_PROPERTY(bool convertSdh READ convertSdh NOTIFY changed)
@@ -28,6 +30,11 @@ public:
 
     QStringList watchFolders() const { return m_watchFolders; }
     QStringList excludedFolders() const { return m_excludedFolders; }
+    // Black-bar removal runs on its own folder lists; when none are set the
+    // ordinary watch/exclude lists are used, so an unconfigured install keeps
+    // cleaning the folders it already watches.
+    QStringList blackBarWatchFolders() const { return m_blackBarWatchFolders.isEmpty() ? m_watchFolders : m_blackBarWatchFolders; }
+    QStringList blackBarExcludedFolders() const { return m_blackBarExcludedFolders.isEmpty() ? m_excludedFolders : m_blackBarExcludedFolders; }
     QString audioLanguage() const { return m_audioLanguage; }
     QString subtitleLanguage() const { return m_subtitleLanguage; }
     bool convertSdh() const { return m_convertSdh; }
@@ -38,6 +45,10 @@ public:
     Q_INVOKABLE void removeWatchFolder(const QString &folder);
     Q_INVOKABLE void addExcludedFolder(const QString &folder);
     Q_INVOKABLE void removeExcludedFolder(const QString &folder);
+    Q_INVOKABLE void addBlackBarWatchFolder(const QString &folder);
+    Q_INVOKABLE void removeBlackBarWatchFolder(const QString &folder);
+    Q_INVOKABLE void addBlackBarExcludedFolder(const QString &folder);
+    Q_INVOKABLE void removeBlackBarExcludedFolder(const QString &folder);
     Q_INVOKABLE void setAudioLanguage(const QString &code);
     Q_INVOKABLE void setSubtitleLanguage(const QString &code);
     Q_INVOKABLE void setConvertSdh(bool enabled);
@@ -50,7 +61,8 @@ private:
     void load(const QString &legacyPath);
     bool readConfig(QStringList *watchFolders, QStringList *excludedFolders,
                     QString *audioLanguage, QString *subtitleLanguage, bool *convertSdh,
-                    bool *removeBars);
+                    bool *removeBars, QStringList *blackBarWatchFolders,
+                    QStringList *blackBarExcludedFolders);
     void watchConfigDirectory();
     void reload();
     bool save();
@@ -59,6 +71,8 @@ private:
     QString m_path;
     QStringList m_watchFolders;
     QStringList m_excludedFolders;
+    QStringList m_blackBarWatchFolders;
+    QStringList m_blackBarExcludedFolders;
     QString m_audioLanguage = "eng";
     QString m_subtitleLanguage = "eng";
     bool m_convertSdh = false;

@@ -1028,6 +1028,123 @@ ApplicationWindow {
                                 onClicked: backend.pickExcludeFolder()
                             }
 
+                            Label {
+                                text: qsTr("Black bars")
+                                font.bold: true
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                text: qsTr("Black-bar cleaning runs on these folders; new files get the re-encode.")
+                                color: "#9a9aa2"
+                                font.pixelSize: 12
+                                wrapMode: Label.Wrap
+                            }
+
+                            ListView {
+                                id: blackBarWatchList
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: Math.min(contentHeight, 140)
+                                clip: true
+                                spacing: 4
+                                model: settings.blackBarWatchFolders
+                                delegate: RowLayout {
+                                    required property var modelData
+                                    width: ListView.view.width
+                                    spacing: 8
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: modelData
+                                        elide: Label.ElideMiddle
+                                        color: "#d8d8de"
+                                    }
+                                    Label {
+                                        text: "✕"
+                                        font.pixelSize: 12
+                                        color: blackBarWatchRemoveMouse.containsMouse ? "#d08080" : "#9a9aa2"
+                                        MouseArea {
+                                            id: blackBarWatchRemoveMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: settings.removeBlackBarWatchFolder(modelData)
+                                        }
+                                    }
+                                }
+                            }
+
+                            RowLayout {
+                                spacing: 10
+                                Button {
+                                    text: "+ " + qsTr("Add folder")
+                                    Material.background: theme.accent
+                                    Material.foreground: theme.accentForeground
+                                    Material.roundedScale: theme.radius
+                                    onClicked: backend.pickBlackBarWatchFolder()
+                                }
+                                Button {
+                                    text: qsTr("Scan now")
+                                    Material.background: theme.accent
+                                    Material.foreground: theme.accentForeground
+                                    Material.roundedScale: theme.radius
+                                    enabled: !win.busy && settings.blackBarWatchFolders.length > 0
+                                    onClicked: {
+                                        win.settingsVisible = false
+                                        backend.scanBlackBarFolders()
+                                    }
+                                }
+                                Item { Layout.fillWidth: true }
+                            }
+
+                            Label {
+                                text: qsTr("Black bars excluded")
+                                font.bold: true
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                text: qsTr("Folders inside these are never watched for black bars.")
+                                color: "#9a9aa2"
+                                font.pixelSize: 12
+                                wrapMode: Label.Wrap
+                            }
+
+                            ListView {
+                                id: blackBarExcludeList
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: Math.min(contentHeight, 100)
+                                clip: true
+                                spacing: 4
+                                model: settings.blackBarExcludedFolders
+                                delegate: RowLayout {
+                                    required property var modelData
+                                    width: ListView.view.width
+                                    spacing: 8
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: modelData
+                                        elide: Label.ElideMiddle
+                                        color: "#d8d8de"
+                                    }
+                                    Label {
+                                        text: "✕"
+                                        font.pixelSize: 12
+                                        color: blackBarExcludeRemoveMouse.containsMouse ? "#d08080" : "#9a9aa2"
+                                        MouseArea {
+                                            id: blackBarExcludeRemoveMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: settings.removeBlackBarExcludedFolder(modelData)
+                                        }
+                                    }
+                                }
+                            }
+
+                            Button {
+                                text: "+ " + qsTr("Exclude folder")
+                                Material.roundedScale: theme.radius
+                                onClicked: backend.pickBlackBarExcludeFolder()
+                            }
+
                             Rectangle { Layout.fillWidth: true; height: 1; color: "#2c2c34" }
 
                             GridLayout {

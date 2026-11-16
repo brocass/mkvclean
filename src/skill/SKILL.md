@@ -30,6 +30,10 @@ recursively for `*.mkv`):
    file in. A file with bars but no other work is still cleaned when this is
    on; `--no-remove-bars` forces the plain remux.
 
+Black-bar cleaning runs on its own watched/excluded folder lists in the
+settings and the watch service; until they are set, the ordinary watch and
+excluded folders are used.
+
 A corrupt or unreadable file is reported as an error and left untouched; one
 bad file never stops the batch.
 

@@ -30,5 +30,9 @@
   "%n file has black bars — tick to remove them.": {
     "one": "%n file has black bars — tick to remove it.",
     "other": "%n files have black bars — tick to remove them."
-  }
+  },
+  "Black-bar cleaning runs on these folders; new files get the re-encode.": "Black-bar cleaning runs on these folders; new files get the re-encode.",
+  "Black bars excluded": "Black bars excluded",
+  "Folders inside these are never watched for black bars.": "Folders inside these are never watched for black bars."
 }
+

@@ -56,8 +56,12 @@ Backend::Backend(FilePicker *picker, QObject *parent, const QString &mkvmerge, c
                     for (const auto &path : paths) {
                         if (purpose == PickPurpose::WatchFolder)
                             m_settings->addWatchFolder(path);
-                        else
+                        else if (purpose == PickPurpose::BlackBarWatchFolder)
+                            m_settings->addBlackBarWatchFolder(path);
+                        else if (purpose == PickPurpose::ExcludeFolder)
                             m_settings->addExcludedFolder(path);
+                        else
+                            m_settings->addBlackBarExcludedFolder(path);
                     }
                 return;
             }
@@ -313,6 +317,20 @@ void Backend::pickExcludeFolder() {
     m_picker->openFolder();
 }
 
+void Backend::pickBlackBarWatchFolder() {
+    if (busy() || !toolsAvailable() || !m_picker || !m_settings)
+        return;
+    m_pickPurpose = PickPurpose::BlackBarWatchFolder;
+    m_picker->openFolder();
+}
+
+void Backend::pickBlackBarExcludeFolder() {
+    if (busy() || !toolsAvailable() || !m_picker || !m_settings)
+        return;
+    m_pickPurpose = PickPurpose::BlackBarExcludeFolder;
+    m_picker->openFolder();
+}
+
 void Backend::setWatchServiceEnabled(bool enabled) {
     QProcess::execute("systemctl", {"--user", enabled ? "enable" : "disable", "--now", "mkvclean"});
     refreshServiceStatus();
@@ -428,11 +446,22 @@ void Backend::inspect(const QString &path) {
 }
 
 void Backend::scanFolders(const QStringList &folders) {
+    scanFolderList(folders, m_settings ? m_settings->excludedFolders() : QStringList());
+}
+
+void Backend::scanBlackBarFolders() {
+    // Black-bar removal keeps its own watched/excluded folder lists; when they
+    // are unset the ordinary lists are used.
+    scanFolderList(m_settings ? m_settings->blackBarWatchFolders() : QStringList(),
+                  m_settings ? m_settings->blackBarExcludedFolders() : QStringList());
+}
+
+void Backend::scanFolderList(const QStringList &folders, const QStringList &excluded) {
     if (busy() || !toolsAvailable())
         return;
     QStringList files = Mkv::collectMkvFiles(folders);
-    if (m_settings)
-        files = Mkv::withoutExcluded(files, m_settings->excludedFolders());
+    if (!excluded.isEmpty())
+        files = Mkv::withoutExcluded(files, excluded);
     if (files.isEmpty()) {
         m_scanFoundNothing = true;
         setStage(Stage::Done);
@@ -583,13 +612,13 @@ void Backend::finishScan() {
         return;
     }
     setStage(Stage::Idle);
-    // A single dirty file cleans straight away too; pausing for a review
-    // after an explicit scan would be odd.
+    // A single file with ordinary track work cleans straight away; a bar-only
+    // file is a per-file decision (tick or not), so it always pauses at the
+    // review list after an explicit scan.
     Mkv::sortNaturally(m_scanAccepted);
     if (m_scanAccepted.size() == 1) {
         const QString &only = m_scanAccepted.first();
-        const bool barsTicked = m_scanCrops.value(only).hasBars() && removeBarsDefault();
-        if (m_scanNeedsWork.value(only) || barsTicked)
+        if (m_scanNeedsWork.value(only))
             m_autoCleanOnce = true;
     }
     // Accepted files are in probe-completion order; present them sorted.

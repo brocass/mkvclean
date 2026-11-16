@@ -1003,6 +1003,37 @@ private slots:
         QVERIFY(reloadedAgain.excludedFolders().isEmpty());
     }
 
+    void blackBarFolderListsRoundTrip()
+    {
+        QTemporaryDir dir;
+        QDir(dir.path()).mkpath("watched");
+        const QString config = dir.filePath("config.json");
+
+        AppSettings settings(config, dir.filePath("no-legacy"));
+        // Until black-bar folders are configured, the ordinary watch list is
+        // the fallback.
+        QCOMPARE(settings.blackBarWatchFolders(), QStringList());
+        QCOMPARE(settings.blackBarExcludedFolders(), QStringList());
+
+        settings.addBlackBarWatchFolder(dir.filePath("watched"));
+        QCOMPARE(settings.blackBarWatchFolders(), QStringList({dir.filePath("watched")}));
+
+        AppSettings reloaded(config, dir.filePath("no-legacy"));
+        QCOMPARE(reloaded.blackBarWatchFolders(), QStringList({dir.filePath("watched")}));
+
+        reloaded.removeBlackBarWatchFolder(dir.filePath("watched"));
+        QCOMPARE(reloaded.blackBarWatchFolders(), QStringList());
+
+        reloaded.addBlackBarExcludedFolder(dir.filePath("watched"));
+        QCOMPARE(reloaded.blackBarExcludedFolders(), QStringList({dir.filePath("watched")}));
+
+        AppSettings reloadedAgain(config, dir.filePath("no-legacy"));
+        QCOMPARE(reloadedAgain.blackBarExcludedFolders(), QStringList({dir.filePath("watched")}));
+
+        reloadedAgain.removeBlackBarExcludedFolder(dir.filePath("watched"));
+        QCOMPARE(reloadedAgain.blackBarExcludedFolders(), QStringList());
+    }
+
     void settingsFollowExternalChanges()
     {
         QTemporaryDir dir;
@@ -1291,6 +1322,33 @@ private slots:
         backend.removeFromQueue(0);
         QCOMPARE(backend.queueCount(), 0);
         QCOMPARE(backend.state(), QString("idle"));
+    }
+
+    void backendScansTheBlackBarFolders()
+    {
+        const QString mkvmerge = QStandardPaths::findExecutable("mkvmerge");
+        const QString mkvextract = QStandardPaths::findExecutable("mkvextract");
+        const QString ffmpeg = QStandardPaths::findExecutable("ffmpeg");
+        if (mkvmerge.isEmpty() || mkvextract.isEmpty() || ffmpeg.isEmpty())
+            QSKIP("needs ffmpeg and MKVToolNix");
+
+        QTemporaryDir dir;
+        const QString sample = makeLetterboxedMkv(dir.path(), ffmpeg, mkvmerge);
+        QVERIFY2(!sample.isEmpty(), "could not build the letterboxed sample");
+
+        AppSettings settings(dir.filePath("config.json"), dir.filePath("no-legacy"));
+        settings.addBlackBarWatchFolder(dir.path());
+        Backend backend(nullptr, nullptr, mkvmerge, mkvextract, 30000, ffmpeg);
+        backend.setSettings(&settings);
+        backend.setReviewAfterScan(true);
+        backend.scanBlackBarFolders();
+        QTRY_COMPARE_WITH_TIMEOUT(backend.state(), QString("review"), 60000);
+        QCOMPARE(backend.queueCount(), 1);
+        QCOMPARE(backend.barsDetectedCount(), 1);
+
+        // A bar-only file still shows up with the bars detected and no other
+        // track work on its plate.
+        QVERIFY(!backend.queue().first().toMap().value("needsWork").toBool());
     }
 
 private:

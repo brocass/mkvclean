@@ -96,10 +96,13 @@ public:
     Q_INVOKABLE void openPath(const QString &path);
     Q_INVOKABLE void openPaths(const QStringList &paths);
     Q_INVOKABLE void scanFolders(const QStringList &folders);
+    Q_INVOKABLE void scanBlackBarFolders();
     Q_INVOKABLE void startBatch();
     Q_INVOKABLE void removeFromQueue(int index);
     Q_INVOKABLE void pickWatchFolder();
     Q_INVOKABLE void pickExcludeFolder();
+    Q_INVOKABLE void pickBlackBarWatchFolder();
+    Q_INVOKABLE void pickBlackBarExcludeFolder();
     Q_INVOKABLE void setWatchServiceEnabled(bool enabled);
     Q_INVOKABLE void refreshServiceStatus();
     Q_INVOKABLE void setRemoveBars(bool enabled);
@@ -143,6 +146,7 @@ private:
     void probeFinished(QProcess *process);
     void retireScanProbe(QProcess *process);
     void finishScan();
+    void scanFolderList(const QStringList &folders, const QStringList &excluded);
     QString subtitleLanguage() const;
     QString audioLanguage() const;
     void failWith(const QString &message);
@@ -219,7 +223,7 @@ private:
 
     // What the open folder picker's result is for: a cleaning job, a new
     // watched folder, or a new excluded folder.
-    enum class PickPurpose { Clean, WatchFolder, ExcludeFolder };
+    enum class PickPurpose { Clean, WatchFolder, ExcludeFolder, BlackBarWatchFolder, BlackBarExcludeFolder };
     PickPurpose m_pickPurpose = PickPurpose::Clean;
 
     QProcess m_serviceProcess;

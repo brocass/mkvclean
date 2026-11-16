@@ -192,7 +192,7 @@ int runWatch(QCoreApplication &app, const QStringList &args) {
         return 0;
     }
     if (command == "scan") {
-        const auto folders = settings.watchFolders();
+        const auto folders = settings.blackBarWatchFolders();
         if (folders.isEmpty()) {
             QTextStream(stderr) << "mkvclean: no folders to scan. Add one with: mkvclean watch add <folder>\n";
             return 1;
@@ -230,7 +230,7 @@ int runWatch(QCoreApplication &app, const QStringList &args) {
                 app.quit();
             }
         });
-        backend.scanFolders(folders);
+        backend.scanBlackBarFolders();
         app.exec();
         return exitCode;
     }

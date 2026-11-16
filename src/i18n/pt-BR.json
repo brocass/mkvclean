@@ -114,5 +114,9 @@
   "Black-bar detection failed.": "Falha na detecção de faixas pretas.",
   "Re-encoding the video failed.": "Falha ao recodificar o vídeo.",
   "The cleaned file could not be prepared.": "O arquivo limpo não pôde ser preparado.",
-  "The cleaned file could not be moved into place; it was left as %1.": "O arquivo limpo não pôde ser movido para o lugar; ele foi deixado como %1."
+  "The cleaned file could not be moved into place; it was left as %1.": "O arquivo limpo não pôde ser movido para o lugar; ele foi deixado como %1.",
+  "Black-bar cleaning runs on these folders; new files get the re-encode.": "A remoção de faixas pretas roda nesses pastas; novos arquivos recebem a re-codificação.",
+  "Black bars excluded": "Faixas pretas excluídas",
+  "Folders inside these are never watched for black bars.": "Pastas dentro dessas pastas nunca são observadas por faixas pretas."
 }
+

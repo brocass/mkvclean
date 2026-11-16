@@ -72,6 +72,32 @@ void AppSettings::removeExcludedFolder(const QString &folder) {
         save();
 }
 
+void AppSettings::addBlackBarWatchFolder(const QString &folder) {
+    const QString absolute = QFileInfo(folder).absoluteFilePath();
+    if (!QFileInfo(absolute).isDir() || m_blackBarWatchFolders.contains(absolute))
+        return;
+    m_blackBarWatchFolders.append(absolute);
+    save();
+}
+
+void AppSettings::removeBlackBarWatchFolder(const QString &folder) {
+    if (m_blackBarWatchFolders.removeAll(folder))
+        save();
+}
+
+void AppSettings::addBlackBarExcludedFolder(const QString &folder) {
+    const QString absolute = QFileInfo(folder).absoluteFilePath();
+    if (!QFileInfo(absolute).isDir() || m_blackBarExcludedFolders.contains(absolute))
+        return;
+    m_blackBarExcludedFolders.append(absolute);
+    save();
+}
+
+void AppSettings::removeBlackBarExcludedFolder(const QString &folder) {
+    if (m_blackBarExcludedFolders.removeAll(folder))
+        save();
+}
+
 void AppSettings::setAudioLanguage(const QString &code) {
     const QString valid = validCode(code);
     if (valid.isEmpty() || valid == m_audioLanguage)
@@ -104,7 +130,7 @@ void AppSettings::setRemoveBars(bool enabled) {
 
 void AppSettings::load(const QString &legacyPath) {
     if (readConfig(&m_watchFolders, &m_excludedFolders, &m_audioLanguage, &m_subtitleLanguage,
-                   &m_convertSdh, &m_removeBars))
+                   &m_convertSdh, &m_removeBars, &m_blackBarWatchFolders, &m_blackBarExcludedFolders))
         return;
 
     // First run after the settings panel existed: adopt the folder list the
@@ -119,11 +145,20 @@ void AppSettings::load(const QString &legacyPath) {
         if (!m_watchFolders.isEmpty())
             save();
     }
+
+    // Black-bar cleaning gets its own lists; until they are set, fall back to
+    // the ordinary watch/exclude lists so an unconfigured install behaves as
+    // before.
+    if (m_blackBarWatchFolders.isEmpty() && !m_watchFolders.isEmpty())
+        m_blackBarWatchFolders = m_watchFolders;
+    if (m_blackBarExcludedFolders.isEmpty() && !m_excludedFolders.isEmpty())
+        m_blackBarExcludedFolders = m_excludedFolders;
 }
 
 bool AppSettings::readConfig(QStringList *watchFolders, QStringList *excludedFolders,
                              QString *audioLanguage, QString *subtitleLanguage, bool *convertSdh,
-                             bool *removeBars) {
+                             bool *removeBars, QStringList *blackBarWatchFolders,
+                             QStringList *blackBarExcludedFolders) {
     QFile file(m_path);
     if (!file.open(QIODevice::ReadOnly))
         return false;
@@ -147,6 +182,12 @@ bool AppSettings::readConfig(QStringList *watchFolders, QStringList *excludedFol
         *subtitleLanguage = subtitle;
     *convertSdh = object.value("convertSdh").toBool(false);
     *removeBars = object.value("removeBars").toBool(false);
+    for (const auto &folder : object.value("blackBarWatchFolders").toArray())
+        if (folder.isString())
+            blackBarWatchFolders->append(folder.toString());
+    for (const auto &folder : object.value("blackBarExcludedFolders").toArray())
+        if (folder.isString())
+            blackBarExcludedFolders->append(folder.toString());
     return true;
 }
 
@@ -160,17 +201,22 @@ void AppSettings::watchConfigDirectory() {
 
 void AppSettings::reload() {
     QStringList watchFolders, excludedFolders;
+    QStringList blackBarWatchFolders, blackBarExcludedFolders;
     QString audio = m_audioLanguage, subtitle = m_subtitleLanguage;
     bool convertSdh = m_convertSdh, removeBars = m_removeBars;
-    if (!readConfig(&watchFolders, &excludedFolders, &audio, &subtitle, &convertSdh, &removeBars))
+    if (!readConfig(&watchFolders, &excludedFolders, &audio, &subtitle, &convertSdh, &removeBars,
+                    &blackBarWatchFolders, &blackBarExcludedFolders))
         return;
     if (watchFolders == m_watchFolders && excludedFolders == m_excludedFolders
+        && blackBarWatchFolders == m_blackBarWatchFolders && blackBarExcludedFolders == m_blackBarExcludedFolders
         && audio == m_audioLanguage && subtitle == m_subtitleLanguage
         && convertSdh == m_convertSdh && removeBars == m_removeBars)
         return;
 
     m_watchFolders = watchFolders;
     m_excludedFolders = excludedFolders;
+    m_blackBarWatchFolders = blackBarWatchFolders;
+    m_blackBarExcludedFolders = blackBarExcludedFolders;
     m_audioLanguage = audio;
     m_subtitleLanguage = subtitle;
     m_convertSdh = convertSdh;
@@ -186,6 +232,8 @@ bool AppSettings::save() {
     const QJsonObject object{
         {"watchFolders", QJsonArray::fromStringList(m_watchFolders)},
         {"excludedFolders", QJsonArray::fromStringList(m_excludedFolders)},
+        {"blackBarWatchFolders", QJsonArray::fromStringList(m_blackBarWatchFolders)},
+        {"blackBarExcludedFolders", QJsonArray::fromStringList(m_blackBarExcludedFolders)},
         {"audioLanguage", m_audioLanguage},
         {"subtitleLanguage", m_subtitleLanguage},
         {"convertSdh", m_convertSdh},

@@ -114,5 +114,9 @@
   "Black-bar detection failed.": "Erkennung schwarzer Balken fehlgeschlagen.",
   "Re-encoding the video failed.": "Neukodierung des Videos fehlgeschlagen.",
   "The cleaned file could not be prepared.": "Die bereinigte Datei konnte nicht vorbereitet werden.",
-  "The cleaned file could not be moved into place; it was left as %1.": "Die bereinigte Datei konnte nicht an ihren Platz verschoben werden; sie wurde als %1 belassen."
+  "The cleaned file could not be moved into place; it was left as %1.": "Die bereinigte Datei konnte nicht an ihren Platz verschoben werden; sie wurde als %1 belassen.",
+  "Black-bar cleaning runs on these folders; new files get the re-encode.": "Die schwarzen-Balken-Verarbeitung läuft in diesen Ordnern; neue Dateien bekommen den Re-Encode.",
+  "Black bars excluded": "Schwarze Balken ausgeschlossen",
+  "Folders inside these are never watched for black bars.": "Ordner in diesen werden nicht für schwarze Balken überwacht."
 }
+
